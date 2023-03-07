@@ -19,24 +19,26 @@
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Stream.h"
+#include <optional>
 
 using namespace lldb;
 using namespace lldb_private;
 using namespace llvm;
 
-// Helper structs used to extract the type of a trace session json without
-// having to parse the entire object.
+// Helper structs used to extract the type of a JSON trace bundle description
+// object without having to parse the entire object.
 
-struct JSONSimpleTraceSession {
+struct JSONSimpleTraceBundleDescription {
   std::string type;
 };
 
 namespace llvm {
 namespace json {
 
-bool fromJSON(const Value &value, JSONSimpleTraceSession &session, Path path) {
+bool fromJSON(const Value &value, JSONSimpleTraceBundleDescription &bundle,
+              Path path) {
   json::ObjectMapper o(value, path);
-  return o && o.map("type", session.type);
+  return o && o.map("type", bundle.type);
 }
 
 } // namespace json
@@ -48,10 +50,10 @@ bool fromJSON(const Value &value, JSONSimpleTraceSession &session, Path path) {
 /// limitations in move constructors.
 /// \{
 template <typename K, typename V>
-static Optional<V> Lookup(DenseMap<K, V> &map, K k) {
+static std::optional<V> Lookup(DenseMap<K, V> &map, K k) {
   auto it = map.find(k);
   if (it == map.end())
-    return None;
+    return std::nullopt;
   return it->second;
 }
 
@@ -65,10 +67,11 @@ static V *LookupAsPtr(DenseMap<K, V> &map, K k) {
 
 /// Similar to the methods above but it looks for an item in a map of maps.
 template <typename K1, typename K2, typename V>
-static Optional<V> Lookup(DenseMap<K1, DenseMap<K2, V>> &map, K1 k1, K2 k2) {
+static std::optional<V> Lookup(DenseMap<K1, DenseMap<K2, V>> &map, K1 k1,
+                               K2 k2) {
   auto it = map.find(k1);
   if (it == map.end())
-    return None;
+    return std::nullopt;
   return Lookup(it->second, k2);
 }
 
@@ -90,19 +93,42 @@ static Error createInvalidPlugInError(StringRef plugin_name) {
 }
 
 Expected<lldb::TraceSP>
-Trace::FindPluginForPostMortemProcess(Debugger &debugger,
-                                      const json::Value &trace_session_file,
-                                      StringRef session_file_dir) {
-  JSONSimpleTraceSession json_session;
-  json::Path::Root root("traceSession");
-  if (!json::fromJSON(trace_session_file, json_session, root))
+Trace::LoadPostMortemTraceFromFile(Debugger &debugger,
+                                   const FileSpec &trace_description_file) {
+
+  auto buffer_or_error =
+      MemoryBuffer::getFile(trace_description_file.GetPath());
+  if (!buffer_or_error) {
+    return createStringError(std::errc::invalid_argument,
+                             "could not open input file: %s - %s.",
+                             trace_description_file.GetPath().c_str(),
+                             buffer_or_error.getError().message().c_str());
+  }
+
+  Expected<json::Value> session_file =
+      json::parse(buffer_or_error.get()->getBuffer().str());
+  if (!session_file) {
+    return session_file.takeError();
+  }
+
+  return Trace::FindPluginForPostMortemProcess(
+      debugger, *session_file,
+      trace_description_file.GetDirectory().AsCString());
+}
+
+Expected<lldb::TraceSP> Trace::FindPluginForPostMortemProcess(
+    Debugger &debugger, const json::Value &trace_bundle_description,
+    StringRef bundle_dir) {
+  JSONSimpleTraceBundleDescription json_bundle;
+  json::Path::Root root("traceBundle");
+  if (!json::fromJSON(trace_bundle_description, json_bundle, root))
     return root.getError();
 
   if (auto create_callback =
-          PluginManager::GetTraceCreateCallback(json_session.type))
-    return create_callback(trace_session_file, session_file_dir, debugger);
+          PluginManager::GetTraceCreateCallback(json_bundle.type))
+    return create_callback(trace_bundle_description, bundle_dir, debugger);
 
-  return createInvalidPlugInError(json_session.type);
+  return createInvalidPlugInError(json_bundle.type);
 }
 
 Expected<lldb::TraceSP> Trace::FindPluginForLiveProcess(llvm::StringRef name,
@@ -158,19 +184,20 @@ Expected<std::string> Trace::GetLiveProcessState() {
   return m_live_process->TraceGetState(GetPluginName());
 }
 
-Optional<uint64_t> Trace::GetLiveThreadBinaryDataSize(lldb::tid_t tid,
-                                                      llvm::StringRef kind) {
+std::optional<uint64_t>
+Trace::GetLiveThreadBinaryDataSize(lldb::tid_t tid, llvm::StringRef kind) {
   Storage &storage = GetUpdatedStorage();
   return Lookup(storage.live_thread_data, tid, ConstString(kind));
 }
 
-Optional<uint64_t> Trace::GetLiveCpuBinaryDataSize(lldb::cpu_id_t cpu_id,
-                                                   llvm::StringRef kind) {
+std::optional<uint64_t> Trace::GetLiveCpuBinaryDataSize(lldb::cpu_id_t cpu_id,
+                                                        llvm::StringRef kind) {
   Storage &storage = GetUpdatedStorage();
   return Lookup(storage.live_cpu_data_sizes, cpu_id, ConstString(kind));
 }
 
-Optional<uint64_t> Trace::GetLiveProcessBinaryDataSize(llvm::StringRef kind) {
+std::optional<uint64_t>
+Trace::GetLiveProcessBinaryDataSize(llvm::StringRef kind) {
   Storage &storage = GetUpdatedStorage();
   return Lookup(storage.live_process_data, ConstString(kind));
 }
@@ -204,7 +231,7 @@ Trace::GetLiveTraceBinaryData(const TraceGetBinaryDataRequest &request,
 
 Expected<std::vector<uint8_t>>
 Trace::GetLiveThreadBinaryData(lldb::tid_t tid, llvm::StringRef kind) {
-  llvm::Optional<uint64_t> size = GetLiveThreadBinaryDataSize(tid, kind);
+  std::optional<uint64_t> size = GetLiveThreadBinaryDataSize(tid, kind);
   if (!size)
     return createStringError(
         inconvertibleErrorCode(),
@@ -212,7 +239,7 @@ Trace::GetLiveThreadBinaryData(lldb::tid_t tid, llvm::StringRef kind) {
         kind.data(), tid);
 
   TraceGetBinaryDataRequest request{GetPluginName().str(), kind.str(), tid,
-                                    /*cpu_id=*/None};
+                                    /*cpu_id=*/std::nullopt};
   return GetLiveTraceBinaryData(request, *size);
 }
 
@@ -222,7 +249,7 @@ Trace::GetLiveCpuBinaryData(lldb::cpu_id_t cpu_id, llvm::StringRef kind) {
     return createStringError(
         inconvertibleErrorCode(),
         "Attempted to fetch live cpu data without a live process.");
-  llvm::Optional<uint64_t> size = GetLiveCpuBinaryDataSize(cpu_id, kind);
+  std::optional<uint64_t> size = GetLiveCpuBinaryDataSize(cpu_id, kind);
   if (!size)
     return createStringError(
         inconvertibleErrorCode(),
@@ -230,20 +257,21 @@ Trace::GetLiveCpuBinaryData(lldb::cpu_id_t cpu_id, llvm::StringRef kind) {
         kind.data(), cpu_id);
 
   TraceGetBinaryDataRequest request{GetPluginName().str(), kind.str(),
-                                    /*tid=*/None, cpu_id};
+                                    /*tid=*/std::nullopt, cpu_id};
   return m_live_process->TraceGetBinaryData(request);
 }
 
 Expected<std::vector<uint8_t>>
 Trace::GetLiveProcessBinaryData(llvm::StringRef kind) {
-  llvm::Optional<uint64_t> size = GetLiveProcessBinaryDataSize(kind);
+  std::optional<uint64_t> size = GetLiveProcessBinaryDataSize(kind);
   if (!size)
     return createStringError(
         inconvertibleErrorCode(),
         "Tracing data \"%s\" is not available for the process.", kind.data());
 
   TraceGetBinaryDataRequest request{GetPluginName().str(), kind.str(),
-                                    /*tid=*/None, /*cpu_id*/ None};
+                                    /*tid=*/std::nullopt,
+                                    /*cpu_id*/ std::nullopt};
   return GetLiveTraceBinaryData(request, *size);
 }
 
@@ -320,7 +348,7 @@ const char *Trace::RefreshLiveProcessState() {
 }
 
 Trace::Trace(ArrayRef<ProcessSP> postmortem_processes,
-             Optional<std::vector<lldb::cpu_id_t>> postmortem_cpus) {
+             std::optional<std::vector<lldb::cpu_id_t>> postmortem_cpus) {
   for (ProcessSP process_sp : postmortem_processes)
     m_storage.postmortem_processes.push_back(process_sp.get());
   m_storage.cpus = postmortem_cpus;
@@ -346,7 +374,7 @@ uint32_t Trace::GetStopID() {
 llvm::Expected<FileSpec>
 Trace::GetPostMortemThreadDataFile(lldb::tid_t tid, llvm::StringRef kind) {
   Storage &storage = GetUpdatedStorage();
-  if (Optional<FileSpec> file =
+  if (std::optional<FileSpec> file =
           Lookup(storage.postmortem_thread_data, tid, ConstString(kind)))
     return *file;
   else
@@ -359,7 +387,7 @@ Trace::GetPostMortemThreadDataFile(lldb::tid_t tid, llvm::StringRef kind) {
 llvm::Expected<FileSpec> Trace::GetPostMortemCpuDataFile(lldb::cpu_id_t cpu_id,
                                                          llvm::StringRef kind) {
   Storage &storage = GetUpdatedStorage();
-  if (Optional<FileSpec> file =
+  if (std::optional<FileSpec> file =
           Lookup(storage.postmortem_cpu_data, cpu_id, ConstString(kind)))
     return *file;
   else
@@ -413,7 +441,7 @@ llvm::Error Trace::OnDataFileRead(FileSpec file,
   if (std::error_code err = trace_or_error.getError())
     return createStringError(
         inconvertibleErrorCode(), "Failed fetching trace-related file %s. %s",
-        file.GetCString(), toString(errorCodeToError(err)).c_str());
+        file.GetPath().c_str(), toString(errorCodeToError(err)).c_str());
 
   MemoryBuffer &data = **trace_or_error;
   ArrayRef<uint8_t> array_ref(

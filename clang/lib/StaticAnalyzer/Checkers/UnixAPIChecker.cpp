@@ -17,11 +17,11 @@
 #include "clang/StaticAnalyzer/Core/Checker.h"
 #include "clang/StaticAnalyzer/Core/CheckerManager.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CheckerContext.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/raw_ostream.h"
+#include <optional>
 
 using namespace clang;
 using namespace ento;
@@ -40,7 +40,7 @@ namespace {
 
 class UnixAPIMisuseChecker : public Checker< check::PreStmt<CallExpr> > {
   mutable std::unique_ptr<BugType> BT_open, BT_pthreadOnce;
-  mutable Optional<uint64_t> Val_O_CREAT;
+  mutable std::optional<uint64_t> Val_O_CREAT;
 
 public:
   void checkPreStmt(const CallExpr *CE, CheckerContext &C) const;
@@ -211,7 +211,7 @@ void UnixAPIMisuseChecker::CheckOpenVariant(CheckerContext &C,
 
   // The definition of O_CREAT is platform specific.  We need a better way
   // of querying this information from the checking environment.
-  if (!Val_O_CREAT.hasValue()) {
+  if (!Val_O_CREAT) {
     if (C.getASTContext().getTargetInfo().getTriple().getVendor()
                                                       == llvm::Triple::Apple)
       Val_O_CREAT = 0x0200;
@@ -234,7 +234,8 @@ void UnixAPIMisuseChecker::CheckOpenVariant(CheckerContext &C,
   }
   NonLoc oflags = V.castAs<NonLoc>();
   NonLoc ocreateFlag = C.getSValBuilder()
-      .makeIntVal(Val_O_CREAT.getValue(), oflagsEx->getType()).castAs<NonLoc>();
+                           .makeIntVal(*Val_O_CREAT, oflagsEx->getType())
+                           .castAs<NonLoc>();
   SVal maskedFlagsUC = C.getSValBuilder().evalBinOpNN(state, BO_And,
                                                       oflags, ocreateFlag,
                                                       oflagsEx->getType());

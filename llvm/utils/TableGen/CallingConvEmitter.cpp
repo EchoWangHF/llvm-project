@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "CodeGenTarget.h"
+#include "TableGenBackends.h"
 #include "llvm/TableGen/Error.h"
 #include "llvm/TableGen/Record.h"
 #include "llvm/TableGen/TableGenBackend.h"
@@ -41,7 +42,7 @@ private:
 } // End anonymous namespace
 
 void CallingConvEmitter::run(raw_ostream &O) {
-  std::vector<Record*> CCs = Records.getAllDerivedDefinitions("CallingConv");
+  std::vector<Record *> CCs = Records.getAllDerivedDefinitions("CallingConv");
 
   // Emit prototypes for all of the non-custom CC's so that they can forward ref
   // each other.
@@ -149,7 +150,8 @@ void CallingConvEmitter::EmitAction(Record *Action,
         << "(ValNo, ValVT, LocVT, LocInfo, ArgFlags, State))\n"
         << IndentStr << "  return false;\n";
       DelegateToMap[CurrentAction].insert(CC->getName().str());
-    } else if (Action->isSubClassOf("CCAssignToReg")) {
+    } else if (Action->isSubClassOf("CCAssignToReg") ||
+               Action->isSubClassOf("CCAssignToRegAndStack")) {
       ListInit *RegList = Action->getValueAsListInit("RegList");
       if (RegList->size() == 1) {
         std::string Name = getQualifiedName(RegList->getElementAsRecord(0));
@@ -178,6 +180,28 @@ void CallingConvEmitter::EmitAction(Record *Action,
       }
       O << IndentStr << "  State.addLoc(CCValAssign::getReg(ValNo, ValVT, "
         << "Reg, LocVT, LocInfo));\n";
+      if (Action->isSubClassOf("CCAssignToRegAndStack")) {
+        int Size = Action->getValueAsInt("Size");
+        int Align = Action->getValueAsInt("Align");
+        O << IndentStr << "  (void)State.AllocateStack(";
+        if (Size)
+          O << Size << ", ";
+        else
+          O << "\n"
+            << IndentStr
+            << "  State.getMachineFunction().getDataLayout()."
+               "getTypeAllocSize(EVT(LocVT).getTypeForEVT(State.getContext())),"
+               " ";
+        if (Align)
+          O << "Align(" << Align << ")";
+        else
+          O << "\n"
+            << IndentStr
+            << "  State.getMachineFunction().getDataLayout()."
+               "getABITypeAlign(EVT(LocVT).getTypeForEVT(State.getContext()"
+               "))";
+        O << ");\n";
+      }
       O << IndentStr << "  return false;\n";
       O << IndentStr << "}\n";
     } else if (Action->isSubClassOf("CCAssignToRegWithShadow")) {
@@ -410,4 +434,4 @@ void EmitCallingConv(RecordKeeper &RK, raw_ostream &OS) {
   CallingConvEmitter(RK).run(OS);
 }
 
-} // End llvm namespace
+} // namespace llvm

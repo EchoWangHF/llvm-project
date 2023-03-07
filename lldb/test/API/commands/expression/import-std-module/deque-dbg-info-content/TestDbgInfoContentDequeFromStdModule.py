@@ -11,6 +11,7 @@ class TestDbgInfoContentDeque(TestBase):
 
     @add_test_categories(["libc++"])
     @skipIf(compiler=no_match("clang"))
+    @skipIf(compiler="clang", compiler_version=['<', '12.0'])
     def test(self):
         self.build()
 
@@ -20,19 +21,23 @@ class TestDbgInfoContentDeque(TestBase):
 
         self.runCmd("settings set target.import-std-module true")
 
-        deque_type = "std::deque<Foo>"
-        size_type = deque_type + "::size_type"
-        value_type = "std::__deque_base<Foo, std::allocator<Foo> >::value_type"
+        if self.expectedCompiler(["clang"]) and self.expectedCompilerVersion(['>', '16.0']):
+            deque_type = "std::deque<Foo>"
+        else:
+            deque_type = "std::deque<Foo, std::allocator<Foo> >"
 
-        iterator_type = deque_type + "::iterator"
+        size_type = "size_type"
+        value_type = "value_type"
+
+        iterator_type = "iterator"
         iterator_children = [
             ValueCheck(name="__m_iter_"),
             ValueCheck(name="__ptr_")
         ]
 
-        riterator_type = deque_type + "::reverse_iterator"
+        riterator_type = "reverse_iterator"
         riterator_children = [
-            ValueCheck(name="__t"),
+            ValueCheck(), # Deprecated __t_ member; no need to check
             ValueCheck(name="current")
         ]
 

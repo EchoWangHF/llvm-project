@@ -70,7 +70,7 @@ MVT WebAssemblyAsmPrinter::getRegType(unsigned RegNo) const {
 
 std::string WebAssemblyAsmPrinter::regToString(const MachineOperand &MO) {
   Register RegNo = MO.getReg();
-  assert(Register::isVirtualRegister(RegNo) &&
+  assert(RegNo.isVirtual() &&
          "Unlowered physical register encountered during assembly printing");
   assert(!MFI->isVRegStackified(RegNo));
   unsigned WAReg = MFI->getWAReg(RegNo);
@@ -211,7 +211,7 @@ MCSymbol *WebAssemblyAsmPrinter::getOrCreateWasmSymbol(StringRef Name) {
   auto *WasmSym = cast<MCSymbolWasm>(GetExternalSymbolSymbol(Name));
 
   // May be called multiple times, so early out.
-  if (WasmSym->getType().hasValue())
+  if (WasmSym->getType())
     return WasmSym;
 
   const WebAssemblySubtarget &Subtarget = getSubtarget();
@@ -272,11 +272,11 @@ MCSymbol *WebAssemblyAsmPrinter::getOrCreateWasmSymbol(StringRef Name) {
 }
 
 void WebAssemblyAsmPrinter::emitSymbolType(const MCSymbolWasm *Sym) {
-  Optional<wasm::WasmSymbolType> WasmTy = Sym->getType();
+  std::optional<wasm::WasmSymbolType> WasmTy = Sym->getType();
   if (!WasmTy)
     return;
 
-  switch (WasmTy.getValue()) {
+  switch (*WasmTy) {
   case wasm::WASM_SYMBOL_TYPE_GLOBAL:
     getTargetStreamer()->emitGlobalType(Sym);
     break;
@@ -597,6 +597,8 @@ void WebAssemblyAsmPrinter::emitFunctionBodyStart() {
 
 void WebAssemblyAsmPrinter::emitInstruction(const MachineInstr *MI) {
   LLVM_DEBUG(dbgs() << "EmitInstruction: " << *MI << '\n');
+  WebAssembly_MC::verifyInstructionPredicates(MI->getOpcode(),
+                                              Subtarget->getFeatureBits());
 
   switch (MI->getOpcode()) {
   case WebAssembly::ARGUMENT_i32:

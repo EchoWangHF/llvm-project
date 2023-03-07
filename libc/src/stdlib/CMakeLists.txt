@@ -5,6 +5,7 @@ add_entrypoint_object(
   HDRS
     atoi.h
   DEPENDS
+    libc.src.errno.errno
     libc.src.__support.str_to_integer
 )
 
@@ -15,6 +16,7 @@ add_entrypoint_object(
   HDRS
     atof.h
   DEPENDS
+    libc.src.errno.errno
     libc.src.__support.str_to_float
 )
 
@@ -25,6 +27,7 @@ add_entrypoint_object(
   HDRS
     atol.h
   DEPENDS
+    libc.src.errno.errno
     libc.src.__support.str_to_integer
 )
 
@@ -35,6 +38,7 @@ add_entrypoint_object(
   HDRS
     atoll.h
   DEPENDS
+    libc.src.errno.errno
     libc.src.__support.str_to_integer
 )
 
@@ -55,6 +59,7 @@ add_entrypoint_object(
   HDRS
     strtof.h
   DEPENDS
+    libc.src.errno.errno
     libc.src.__support.str_to_float
 )
 
@@ -65,6 +70,7 @@ add_entrypoint_object(
   HDRS
     strtod.h
   DEPENDS
+    libc.src.errno.errno
     libc.src.__support.str_to_float
 )
 
@@ -75,6 +81,7 @@ add_entrypoint_object(
   HDRS
     strtold.h
   DEPENDS
+    libc.src.errno.errno
     libc.src.__support.str_to_float
 )
 
@@ -85,6 +92,7 @@ add_entrypoint_object(
   HDRS
     strtol.h
   DEPENDS
+    libc.src.errno.errno
     libc.src.__support.str_to_integer
 )
 
@@ -95,6 +103,7 @@ add_entrypoint_object(
   HDRS
     strtoll.h
   DEPENDS
+    libc.src.errno.errno
     libc.src.__support.str_to_integer
 )
 
@@ -105,6 +114,7 @@ add_entrypoint_object(
   HDRS
     strtoul.h
   DEPENDS
+    libc.src.errno.errno
     libc.src.__support.str_to_integer
 )
 
@@ -115,6 +125,7 @@ add_entrypoint_object(
   HDRS
     strtoull.h
   DEPENDS
+    libc.src.errno.errno
     libc.src.__support.str_to_integer
 )
 
@@ -198,6 +209,36 @@ add_entrypoint_object(
   HDRS
     qsort.h
   DEPENDS
+    libc.include.stdlib
+)
+
+add_object_library(
+  rand_util
+  SRCS
+    rand_util.cpp
+  HDRS
+    rand_util.h
+)
+
+add_entrypoint_object(
+  rand
+  SRCS
+    rand.cpp
+  HDRS
+    rand.h
+  DEPENDS
+    .rand_util
+    libc.include.stdlib
+)
+
+add_entrypoint_object(
+  srand
+  SRCS
+    srand.cpp
+  HDRS
+    srand.h
+  DEPENDS
+    .rand_util
     libc.include.stdlib
 )
 
@@ -286,7 +327,8 @@ add_entrypoint_object(
   CXX_STANDARD
     20 # For constinit of the atexit callback list.
   DEPENDS
-    libc.src.__support.CPP.blockstore
+    libc.src.__support.fixedvector
+    libc.src.__support.blockstore
     libc.src.__support.threads.mutex
 )
 
@@ -301,9 +343,9 @@ add_entrypoint_object(
     .atexit
 )
 
-# add_entrypoint_object(
-#   abort
-#   ALIAS
-#   DEPENDS
-#     .${LIBC_TARGET_OS}.abort
-# )
+add_entrypoint_object(
+  abort
+  ALIAS
+  DEPENDS
+    .${LIBC_TARGET_OS}.abort
+)

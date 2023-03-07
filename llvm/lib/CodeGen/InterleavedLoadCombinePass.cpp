@@ -318,7 +318,7 @@ public:
 
     // See Proof(2): Trailing zero bits indicate a left shift. This removes
     // leading bits from the result even if they are undefined.
-    decErrorMSBs(C.countTrailingZeros());
+    decErrorMSBs(C.countr_zero());
 
     A *= C;
     pushBOperation(Mul, C);
@@ -475,7 +475,7 @@ public:
     //
     // If this can be proven add shiftAmt to the error counter
     // `ErrorMSBs`. Otherwise set all bits as undefined.
-    if (A.countTrailingZeros() < shiftAmt)
+    if (A.countr_zero() < shiftAmt)
       ErrorMSBs = A.getBitWidth();
     else
       incErrorMSBs(shiftAmt);
@@ -528,8 +528,8 @@ public:
     if (B.size() != o.B.size())
       return false;
 
-    auto ob = o.B.begin();
-    for (auto &b : B) {
+    auto *ob = o.B.begin();
+    for (const auto &b : B) {
       if (b != *ob)
         return false;
       ob++;
@@ -887,7 +887,7 @@ public:
           ConstantInt::get(Type::getInt32Ty(LI->getContext()), 0),
           ConstantInt::get(Type::getInt32Ty(LI->getContext()), i),
       };
-      int64_t Ofs = DL.getIndexedOffsetInType(Result.VTy, makeArrayRef(Idx, 2));
+      int64_t Ofs = DL.getIndexedOffsetInType(Result.VTy, ArrayRef(Idx, 2));
       Result.EI[i] = ElementInfo(Offset + Ofs, i == 0 ? LI : nullptr);
     }
 
@@ -1154,7 +1154,7 @@ bool InterleavedLoadCombineImpl::combine(std::list<VectorInfo> &InterleavedLoad,
   // Test if all participating instruction will be dead after the
   // transformation. If intermediate results are used, no performance gain can
   // be expected. Also sum the cost of the Instructions beeing left dead.
-  for (auto &I : Is) {
+  for (const auto &I : Is) {
     // Compute the old cost
     InstructionCost += TTI.getInstructionCost(I, CostKind);
 
@@ -1182,7 +1182,7 @@ bool InterleavedLoadCombineImpl::combine(std::list<VectorInfo> &InterleavedLoad,
   // that the corresponding defining access dominates first LI. This guarantees
   // that there are no aliasing stores in between the loads.
   auto FMA = MSSA.getMemoryAccess(First);
-  for (auto LI : LIs) {
+  for (auto *LI : LIs) {
     auto MADef = MSSA.getMemoryAccess(LI)->getDefiningAccess();
     if (!MSSA.dominates(MADef, FMA))
       return false;

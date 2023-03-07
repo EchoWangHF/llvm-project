@@ -121,7 +121,7 @@ DeclContext *Sema::computeDeclContext(const CXXScopeSpec &SS,
             // entering the context, and that can't happen in a SFINAE context.
             assert(!isSFINAEContext() &&
                    "partial specialization scope specifier in SFINAE context?");
-            if (!hasVisibleDeclaration(PartialSpec))
+            if (!hasReachableDefinition(PartialSpec))
               diagnoseMissingImport(SS.getLastQualifierNameLoc(), PartialSpec,
                                     MissingImportKind::PartialSpecialization,
                                     /*Recover*/true);
@@ -243,8 +243,8 @@ bool Sema::RequireCompleteEnumDecl(EnumDecl *EnumD, SourceLocation L,
   if (EnumD->isCompleteDefinition()) {
     // If we know about the definition but it is not visible, complain.
     NamedDecl *SuggestedDef = nullptr;
-    if (!hasVisibleDefinition(EnumD, &SuggestedDef,
-                              /*OnlyNeedComplete*/false)) {
+    if (!hasReachableDefinition(EnumD, &SuggestedDef,
+                                /*OnlyNeedComplete*/ false)) {
       // If the user is going to see an error here, recover by making the
       // definition visible.
       bool TreatAsComplete = !isSFINAEContext();
@@ -292,6 +292,11 @@ bool Sema::ActOnCXXGlobalScopeSpecifier(SourceLocation CCLoc,
 bool Sema::ActOnSuperScopeSpecifier(SourceLocation SuperLoc,
                                     SourceLocation ColonColonLoc,
                                     CXXScopeSpec &SS) {
+  if (getCurLambda()) {
+    Diag(SuperLoc, diag::err_super_in_lambda_unsupported);
+    return true;
+  }
+
   CXXRecordDecl *RD = nullptr;
   for (Scope *S = getCurScope(); S; S = S->getParent()) {
     if (S->isFunctionScope()) {
@@ -307,9 +312,6 @@ bool Sema::ActOnSuperScopeSpecifier(SourceLocation SuperLoc,
 
   if (!RD) {
     Diag(SuperLoc, diag::err_invalid_super_scope);
-    return true;
-  } else if (RD->isLambda()) {
-    Diag(SuperLoc, diag::err_super_in_lambda_unsupported);
     return true;
   } else if (RD->getNumBases() == 0) {
     Diag(SuperLoc, diag::err_no_base_classes) << RD->getName();
@@ -931,10 +933,9 @@ bool Sema::ActOnCXXNestedNameSpecifier(Scope *S,
     // Handle a dependent template specialization for which we cannot resolve
     // the template name.
     assert(DTN->getQualifier() == SS.getScopeRep());
-    QualType T = Context.getDependentTemplateSpecializationType(ETK_None,
-                                                          DTN->getQualifier(),
-                                                          DTN->getIdentifier(),
-                                                                TemplateArgs);
+    QualType T = Context.getDependentTemplateSpecializationType(
+        ETK_None, DTN->getQualifier(), DTN->getIdentifier(),
+        TemplateArgs.arguments());
 
     // Create source-location information for this type.
     TypeLocBuilder Builder;

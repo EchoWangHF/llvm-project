@@ -80,6 +80,7 @@ tools = [
     ToolSubst('llvm-bolt', unresolved='fatal'),
     ToolSubst('llvm-boltdiff', unresolved='fatal'),
     ToolSubst('llvm-bolt-heatmap', unresolved='fatal'),
+    ToolSubst('llvm-bat-dump', unresolved='fatal'),
     ToolSubst('perf2bolt', unresolved='fatal'),
     ToolSubst('yaml2obj', unresolved='fatal'),
     ToolSubst('llvm-mc', unresolved='fatal'),
@@ -92,6 +93,7 @@ tools = [
     ToolSubst('merge-fdata', unresolved='fatal'),
     ToolSubst('llvm-readobj', unresolved='fatal'),
     ToolSubst('llvm-dwp', unresolved='fatal'),
+    ToolSubst('split-file', unresolved='fatal'),
 ]
 llvm_config.add_tool_substitutions(tools, tool_dirs)
 

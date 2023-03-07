@@ -65,14 +65,13 @@ func.func @ops(%arg0: i32, %arg1: f32,
 // CHECK: %[[STRUCT:.*]] = llvm.call @foo(%[[I32]]) : (i32) -> !llvm.struct<(i32, f64, i32)>
 // CHECK: %[[VALUE:.*]] = llvm.extractvalue %[[STRUCT]][0] : !llvm.struct<(i32, f64, i32)>
 // CHECK: %[[NEW_STRUCT:.*]] = llvm.insertvalue %[[VALUE]], %[[STRUCT]][2] : !llvm.struct<(i32, f64, i32)>
-// CHECK: %[[FUNC:.*]] = llvm.mlir.addressof @foo : !llvm.ptr<func<struct<(i32, f64, i32)> (i32)>>
-// CHECK: %{{.*}} = llvm.call %[[FUNC]](%[[I32]]) : (i32) -> !llvm.struct<(i32, f64, i32)>
+// CHECK: %[[FUNC:.*]] = llvm.mlir.addressof @foo : !llvm.ptr
+// CHECK: %{{.*}} = llvm.call %[[FUNC]](%[[I32]]) : !llvm.ptr, (i32) -> !llvm.struct<(i32, f64, i32)>
   %17 = llvm.call @foo(%arg0) : (i32) -> !llvm.struct<(i32, f64, i32)>
   %18 = llvm.extractvalue %17[0] : !llvm.struct<(i32, f64, i32)>
   %19 = llvm.insertvalue %18, %17[2] : !llvm.struct<(i32, f64, i32)>
-  %20 = llvm.mlir.addressof @foo : !llvm.ptr<func<struct<(i32, f64, i32)> (i32)>>
-  %21 = llvm.call %20(%arg0) : (i32) -> !llvm.struct<(i32, f64, i32)>
-
+  %20 = llvm.mlir.addressof @foo : !llvm.ptr
+  %21 = llvm.call %20(%arg0) : !llvm.ptr, (i32) -> !llvm.struct<(i32, f64, i32)>
 
 // Terminator operations and their successors.
 //
@@ -146,23 +145,23 @@ func.func @ops(%arg0: i32, %arg1: f32,
 // CHECK: %{{.*}} = llvm.fneg %[[FLOAT]] : f32
   %29 = llvm.fneg %arg1 : f32
 
-// CHECK: "llvm.intr.sin"(%[[FLOAT]]) : (f32) -> f32
-  %30 = "llvm.intr.sin"(%arg1) : (f32) -> f32
+// CHECK: llvm.intr.sin(%[[FLOAT]]) : (f32) -> f32
+  %30 = llvm.intr.sin(%arg1) : (f32) -> f32
 
-// CHECK: "llvm.intr.pow"(%[[FLOAT]], %[[FLOAT]]) : (f32, f32) -> f32
-  %31 = "llvm.intr.pow"(%arg1, %arg1) : (f32, f32) -> f32
+// CHECK: llvm.intr.pow(%[[FLOAT]], %[[FLOAT]]) : (f32, f32) -> f32
+  %31 = llvm.intr.pow(%arg1, %arg1) : (f32, f32) -> f32
 
-// CHECK: "llvm.intr.powi"(%[[FLOAT]], %[[I32]]) : (f32, i32) -> f32
-  %a31 = "llvm.intr.powi"(%arg1, %arg0) : (f32, i32) -> f32
+// CHECK: llvm.intr.powi(%[[FLOAT]], %[[I32]]) : (f32, i32) -> f32
+  %a31 = llvm.intr.powi(%arg1, %arg0) : (f32, i32) -> f32
 
-// CHECK: "llvm.intr.bitreverse"(%{{.*}}) : (i32) -> i32
-  %32 = "llvm.intr.bitreverse"(%arg0) : (i32) -> i32
+// CHECK: llvm.intr.bitreverse(%{{.*}}) : (i32) -> i32
+  %32 = llvm.intr.bitreverse(%arg0) : (i32) -> i32
 
-// CHECK: "llvm.intr.ctpop"(%{{.*}}) : (i32) -> i32
-  %33 = "llvm.intr.ctpop"(%arg0) : (i32) -> i32
+// CHECK: llvm.intr.ctpop(%{{.*}}) : (i32) -> i32
+  %33 = llvm.intr.ctpop(%arg0) : (i32) -> i32
 
-// CHECK: "llvm.intr.round"(%[[FLOAT]]) : (f32) -> f32
-  %34 = "llvm.intr.round"(%arg1) : (f32) -> f32
+// CHECK: llvm.intr.round(%[[FLOAT]]) : (f32) -> f32
+  %34 = llvm.intr.round(%arg1) : (f32) -> f32
 
 // CHECK: "llvm.intr.memcpy"(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) : (!llvm.ptr<i8>, !llvm.ptr<i8>, i32, i1) -> ()
   "llvm.intr.memcpy"(%arg2, %arg3, %arg0, %arg4) : (!llvm.ptr<i8>, !llvm.ptr<i8>, i32, i1) -> ()
@@ -181,11 +180,11 @@ func.func @ops(%arg0: i32, %arg1: f32,
 
 // CHECK-LABEL: @gep
 llvm.func @gep(%ptr: !llvm.ptr<struct<(i32, struct<(i32, f32)>)>>, %idx: i64,
-               %ptr2: !llvm.ptr<struct<(array<10xf32>)>>) {
+               %ptr2: !llvm.ptr<struct<(array<10 x f32>)>>) {
   // CHECK: llvm.getelementptr %{{.*}}[%{{.*}}, 1, 0] : (!llvm.ptr<struct<(i32, struct<(i32, f32)>)>>, i64) -> !llvm.ptr<i32>
   llvm.getelementptr %ptr[%idx, 1, 0] : (!llvm.ptr<struct<(i32, struct<(i32, f32)>)>>, i64) -> !llvm.ptr<i32>
-  // CHECK: llvm.getelementptr %{{.*}}[%{{.*}}, 0, %{{.*}}] : (!llvm.ptr<struct<(array<10 x f32>)>>, i64, i64) -> !llvm.ptr<f32>
-  llvm.getelementptr %ptr2[%idx, 0, %idx] : (!llvm.ptr<struct<(array<10 x f32>)>>, i64, i64) -> !llvm.ptr<f32>
+  // CHECK: llvm.getelementptr inbounds %{{.*}}[%{{.*}}, 0, %{{.*}}] : (!llvm.ptr<struct<(array<10 x f32>)>>, i64, i64) -> !llvm.ptr<f32>
+  llvm.getelementptr inbounds %ptr2[%idx, 0, %idx] : (!llvm.ptr<struct<(array<10 x f32>)>>, i64, i64) -> !llvm.ptr<f32>
   llvm.return
 }
 
@@ -283,10 +282,10 @@ func.func @vect(%arg0: vector<4xf32>, %arg1: i32, %arg2: f32, %arg3: !llvm.vec<2
   %0 = llvm.extractelement %arg0[%arg1 : i32] : vector<4xf32>
 // CHECK:  = llvm.insertelement {{.*}} : vector<4xf32>
   %1 = llvm.insertelement %arg2, %arg0[%arg1 : i32] : vector<4xf32>
-// CHECK:  = llvm.shufflevector {{.*}} [0 : i32, 0 : i32, 0 : i32, 0 : i32, 7 : i32] : vector<4xf32>, vector<4xf32>
-  %2 = llvm.shufflevector %arg0, %arg0 [0 : i32, 0 : i32, 0 : i32, 0 : i32, 7 : i32] : vector<4xf32>, vector<4xf32>
-// CHECK:  = llvm.shufflevector %{{.+}}, %{{.+}} [1 : i32, 0 : i32] : !llvm.vec<2 x ptr<i32>>, !llvm.vec<2 x ptr<i32>>
-  %3 = llvm.shufflevector %arg3, %arg3 [1 : i32, 0 : i32] : !llvm.vec<2 x ptr<i32>>, !llvm.vec<2 x ptr<i32>>
+// CHECK:  = llvm.shufflevector {{.*}} [0, 0, 0, 0, 7] : vector<4xf32>
+  %2 = llvm.shufflevector %arg0, %arg0 [0, 0, 0, 0, 7] : vector<4xf32>
+// CHECK:  = llvm.shufflevector %{{.+}}, %{{.+}} [1, 0] : !llvm.vec<2 x ptr<i32>>
+  %3 = llvm.shufflevector %arg3, %arg3 [1, 0] : !llvm.vec<2 x ptr<i32>>
 // CHECK:  = llvm.mlir.constant(dense<1.000000e+00> : vector<4xf32>) : vector<4xf32>
   %4 = llvm.mlir.constant(dense<1.0> : vector<4xf32>) : vector<4xf32>
   return
@@ -298,10 +297,27 @@ func.func @scalable_vect(%arg0: vector<[4]xf32>, %arg1: i32, %arg2: f32) {
   %0 = llvm.extractelement %arg0[%arg1 : i32] : vector<[4]xf32>
 // CHECK:  = llvm.insertelement {{.*}} : vector<[4]xf32>
   %1 = llvm.insertelement %arg2, %arg0[%arg1 : i32] : vector<[4]xf32>
-// CHECK:  = llvm.shufflevector {{.*}} [0 : i32, 0 : i32, 0 : i32, 0 : i32] : vector<[4]xf32>, vector<[4]xf32>
-  %2 = llvm.shufflevector %arg0, %arg0 [0 : i32, 0 : i32, 0 : i32, 0 : i32] : vector<[4]xf32>, vector<[4]xf32>
+// CHECK:  = llvm.shufflevector {{.*}} [0, 0, 0, 0] : vector<[4]xf32>
+  %2 = llvm.shufflevector %arg0, %arg0 [0, 0, 0, 0] : vector<[4]xf32>
 // CHECK:  = llvm.mlir.constant(dense<1.000000e+00> : vector<[4]xf32>) : vector<[4]xf32>
   %3 = llvm.mlir.constant(dense<1.0> : vector<[4]xf32>) : vector<[4]xf32>
+  return
+}
+
+// CHECK-LABEL: @mixed_vect
+func.func @mixed_vect(%arg0: vector<8xf32>, %arg1: vector<4xf32>, %arg2: vector<[4]xf32>) {
+  // CHECK: = llvm.intr.vector.insert {{.*}} : vector<8xf32> into vector<[4]xf32>
+  %0 = llvm.intr.vector.insert %arg0, %arg2[0] : vector<8xf32> into vector<[4]xf32>
+  // CHECK: = llvm.intr.vector.insert {{.*}} : vector<4xf32> into vector<[4]xf32>
+  %1 = llvm.intr.vector.insert %arg1, %arg2[0] : vector<4xf32> into vector<[4]xf32>
+  // CHECK: = llvm.intr.vector.insert {{.*}} : vector<4xf32> into vector<[4]xf32>
+  %2 = llvm.intr.vector.insert %arg1, %1[4] : vector<4xf32> into vector<[4]xf32>
+  // CHECK: = llvm.intr.vector.insert {{.*}} : vector<4xf32> into vector<8xf32>
+  %3 = llvm.intr.vector.insert %arg1, %arg0[4] : vector<4xf32> into vector<8xf32>
+  // CHECK: = llvm.intr.vector.extract {{.*}} : vector<8xf32> from vector<[4]xf32>
+  %4 = llvm.intr.vector.extract %2[0] : vector<8xf32> from vector<[4]xf32>
+  // CHECK: = llvm.intr.vector.extract {{.*}} : vector<2xf32> from vector<8xf32>
+  %5 = llvm.intr.vector.extract %arg0[6] : vector<2xf32> from vector<8xf32>
   return
 }
 
@@ -323,17 +339,39 @@ func.func @null() {
   llvm.return
 }
 
+// CHECK-LABEL: @atomic_load
+func.func @atomic_load(%ptr : !llvm.ptr) {
+  // CHECK: llvm.load %{{.*}} atomic monotonic {alignment = 4 : i64} : !llvm.ptr -> f32
+  %0 = llvm.load %ptr atomic monotonic {alignment = 4 : i64} : !llvm.ptr -> f32
+  // CHECK: llvm.load volatile %{{.*}} atomic syncscope("singlethread") monotonic {alignment = 16 : i64} : !llvm.ptr -> f32
+  %1 = llvm.load volatile %ptr atomic syncscope("singlethread") monotonic {alignment = 16 : i64} : !llvm.ptr -> f32
+  llvm.return
+}
+
+// CHECK-LABEL: @atomic_store
+func.func @atomic_store(%val : f32, %ptr : !llvm.ptr) {
+  // CHECK: llvm.store %{{.*}}, %{{.*}} atomic monotonic {alignment = 4 : i64} : f32, !llvm.ptr
+  llvm.store %val, %ptr atomic monotonic {alignment = 4 : i64} : f32, !llvm.ptr
+  // CHECK: llvm.store volatile %{{.*}}, %{{.*}} atomic syncscope("singlethread") monotonic {alignment = 16 : i64} : f32, !llvm.ptr
+  llvm.store volatile %val, %ptr atomic syncscope("singlethread") monotonic {alignment = 16 : i64} : f32, !llvm.ptr
+  llvm.return
+}
+
 // CHECK-LABEL: @atomicrmw
-func.func @atomicrmw(%ptr : !llvm.ptr<f32>, %val : f32) {
-  // CHECK: llvm.atomicrmw fadd %{{.*}}, %{{.*}} monotonic : f32
-  %0 = llvm.atomicrmw fadd %ptr, %val monotonic : f32
+func.func @atomicrmw(%ptr : !llvm.ptr, %val : f32) {
+  // CHECK: llvm.atomicrmw fadd %{{.*}}, %{{.*}} monotonic : !llvm.ptr, f32
+  %0 = llvm.atomicrmw fadd %ptr, %val monotonic : !llvm.ptr, f32
+  // CHECK: llvm.atomicrmw volatile fsub %{{.*}}, %{{.*}} syncscope("singlethread") monotonic {alignment = 16 : i64} : !llvm.ptr, f32
+  %1 = llvm.atomicrmw volatile fsub %ptr, %val syncscope("singlethread") monotonic {alignment = 16 : i64} : !llvm.ptr, f32
   llvm.return
 }
 
 // CHECK-LABEL: @cmpxchg
-func.func @cmpxchg(%ptr : !llvm.ptr<i32>, %cmp : i32, %new : i32) {
-  // CHECK: llvm.cmpxchg %{{.*}}, %{{.*}}, %{{.*}} acq_rel monotonic : i32
-  %0 = llvm.cmpxchg %ptr, %cmp, %new acq_rel monotonic : i32
+func.func @cmpxchg(%ptr : !llvm.ptr, %cmp : i32, %new : i32) {
+  // CHECK: llvm.cmpxchg %{{.*}}, %{{.*}}, %{{.*}} acq_rel monotonic : !llvm.ptr, i32
+  %0 = llvm.cmpxchg %ptr, %cmp, %new acq_rel monotonic : !llvm.ptr, i32
+  // CHECK: llvm.cmpxchg weak volatile %{{.*}}, %{{.*}}, %{{.*}} syncscope("singlethread") acq_rel monotonic {alignment = 16 : i64} : !llvm.ptr, i32
+  %1 = llvm.cmpxchg weak volatile %ptr, %cmp, %new syncscope("singlethread") acq_rel monotonic {alignment = 16 : i64} : !llvm.ptr, i32
   llvm.return
 }
 
@@ -366,11 +404,11 @@ llvm.func @invokeLandingpad() -> i32 attributes { personality = @__gxx_personali
 
 // CHECK: ^[[BB1]]:
 // CHECK:   %[[lp:.*]] = llvm.landingpad cleanup (catch %[[a3]] : !llvm.ptr<ptr<i8>>) (catch %[[a6]] : !llvm.ptr<i8>) (filter %[[a2]] : !llvm.array<1 x i8>) : !llvm.struct<(ptr<i8>, i32)>
-// CHECK:   %{{.*}} = llvm.intr.eh.typeid.for %6 : i32
+// CHECK:   %{{.*}} = llvm.intr.eh.typeid.for %6 : (!llvm.ptr<i8>) -> i32
 // CHECK:   llvm.resume %[[lp]] : !llvm.struct<(ptr<i8>, i32)>
 ^bb1:
   %10 = llvm.landingpad cleanup (catch %3 : !llvm.ptr<ptr<i8>>) (catch %6 : !llvm.ptr<i8>) (filter %2 : !llvm.array<1 x i8>) : !llvm.struct<(ptr<i8>, i32)>
-  %11 = llvm.intr.eh.typeid.for %6 : i32
+  %11 = llvm.intr.eh.typeid.for %6 : (!llvm.ptr<i8>) -> i32
   llvm.resume %10 : !llvm.struct<(ptr<i8>, i32)>
 
 // CHECK: ^[[BB2]]:
@@ -384,8 +422,15 @@ llvm.func @invokeLandingpad() -> i32 attributes { personality = @__gxx_personali
   llvm.invoke @bar(%8, %6, %4) to ^bb2 unwind ^bb1 : (!llvm.ptr<i8>, !llvm.ptr<i8>, !llvm.ptr<i8>) -> ()
 
 // CHECK: ^[[BB4:.*]]:
-// CHECK:   llvm.return %[[a0]] : i32
+// CHECK: %[[FUNC:.*]] = llvm.mlir.addressof @foo : !llvm.ptr
+// CHECK: %{{.*}} = llvm.invoke %[[FUNC]]{{.*}}: !llvm.ptr,
 ^bb4:
+  %12 = llvm.mlir.addressof @foo : !llvm.ptr
+  %13 = llvm.invoke %12(%7) to ^bb2 unwind ^bb1 : !llvm.ptr, (i32) -> !llvm.struct<(i32, f64, i32)>
+
+// CHECK: ^[[BB5:.*]]:
+// CHECK:   llvm.return %[[a0]] : i32
+^bb5:
   llvm.return %0 : i32
 }
 
@@ -432,7 +477,7 @@ llvm.func @useInlineAsm(%arg0: i32) {
 }
 
 // CHECK-LABEL: @fastmathFlags
-func.func @fastmathFlags(%arg0: f32, %arg1: f32, %arg2: i32) {
+func.func @fastmathFlags(%arg0: f32, %arg1: f32, %arg2: i32, %arg3: vector<2 x f32>, %arg4: vector<2 x f32>) {
 // CHECK: {{.*}} = llvm.fadd %arg0, %arg1 {fastmathFlags = #llvm.fastmath<fast>} : f32
 // CHECK: {{.*}} = llvm.fsub %arg0, %arg1 {fastmathFlags = #llvm.fastmath<fast>} : f32
 // CHECK: {{.*}} = llvm.fmul %arg0, %arg1 {fastmathFlags = #llvm.fastmath<fast>} : f32
@@ -444,8 +489,14 @@ func.func @fastmathFlags(%arg0: f32, %arg1: f32, %arg2: i32) {
   %3 = llvm.fdiv %arg0, %arg1 {fastmathFlags = #llvm.fastmath<fast>} : f32
   %4 = llvm.frem %arg0, %arg1 {fastmathFlags = #llvm.fastmath<fast>} : f32
 
-// CHECK: {{.*}} = llvm.fcmp "oeq" %arg0, %arg1 {fastmathFlags = #llvm.fastmath<fast>} : f32
+// CHECK: %[[SCALAR_PRED0:.+]] = llvm.fcmp "oeq" %arg0, %arg1 {fastmathFlags = #llvm.fastmath<fast>} : f32
   %5 = llvm.fcmp "oeq" %arg0, %arg1 {fastmathFlags = #llvm.fastmath<fast>} : f32
+// CHECK: %{{.*}} = llvm.add %[[SCALAR_PRED0]], %[[SCALAR_PRED0]] : i1
+  %typecheck_5 = llvm.add %5, %5 : i1
+// CHECK: %[[VEC_PRED0:.+]] = llvm.fcmp "oeq" %arg3, %arg4 {fastmathFlags = #llvm.fastmath<fast>} : vector<2xf32>
+  %vcmp = llvm.fcmp "oeq" %arg3, %arg4 {fastmathFlags = #llvm.fastmath<fast>} : vector<2xf32>
+// CHECK: %{{.*}} = llvm.add %[[VEC_PRED0]], %[[VEC_PRED0]] : vector<2xi1>
+  %typecheck_vcmp = llvm.add %vcmp, %vcmp : vector<2xi1>
 
 // CHECK: {{.*}} = llvm.fneg %arg0 {fastmathFlags = #llvm.fastmath<fast>} : f32
   %6 = llvm.fneg %arg0 {fastmathFlags = #llvm.fastmath<fast>} : f32
@@ -454,28 +505,89 @@ func.func @fastmathFlags(%arg0: f32, %arg1: f32, %arg2: i32) {
   %7 = llvm.call @foo(%arg2) {fastmathFlags = #llvm.fastmath<fast>} : (i32) -> !llvm.struct<(i32, f64, i32)>
 
 // CHECK: {{.*}} = llvm.fadd %arg0, %arg1 : f32
-  %8 = llvm.fadd %arg0, %arg1 {fastmathFlags = #llvm.fastmath<>} : f32
+  %8 = llvm.fadd %arg0, %arg1 {fastmathFlags = #llvm.fastmath<none>} : f32
 // CHECK: {{.*}} = llvm.fadd %arg0, %arg1 {fastmathFlags = #llvm.fastmath<nnan, ninf>} : f32
   %9 = llvm.fadd %arg0, %arg1 {fastmathFlags = #llvm.fastmath<nnan,ninf>} : f32
 
 // CHECK: {{.*}} = llvm.fneg %arg0 : f32
-  %10 = llvm.fneg %arg0 {fastmathFlags = #llvm.fastmath<>} : f32
+  %10 = llvm.fneg %arg0 {fastmathFlags = #llvm.fastmath<none>} : f32
+
+// CHECK: {{.*}} = llvm.intr.sin(%arg0) {fastmathFlags = #llvm.fastmath<fast>} : (f32) -> f32
+  %11 = llvm.intr.sin(%arg0) {fastmathFlags = #llvm.fastmath<fast>} : (f32) -> f32
+// CHECK: {{.*}} = llvm.intr.sin(%arg0) {fastmathFlags = #llvm.fastmath<afn>} : (f32) -> f32
+  %12 = llvm.intr.sin(%arg0) {fastmathFlags = #llvm.fastmath<afn>} : (f32) -> f32
   return
 }
 
-module {
-  // CHECK-LABEL: @loopOptions
-  llvm.func @loopOptions() {
-    // CHECK: llvm.br
-    // CHECK-SAME: llvm.loop = {options = #llvm.loopopts<disable_unroll = true, disable_licm = true, interleave_count = 1, disable_pipeline = true, pipeline_initiation_interval = 1>}, parallel_access = [@metadata::@group1]}
-    llvm.br ^bb1 {llvm.loop = {options = #llvm.loopopts<disable_unroll = true, disable_licm = true, interleave_count = 1, disable_pipeline = true, pipeline_initiation_interval = 1>}, parallel_access = [@metadata::@group1]}
-  ^bb1:
-    llvm.return
-  }
-  // CHECK: llvm.metadata @metadata attributes {test_attribute} {
-  llvm.metadata @metadata attributes {test_attribute} {
-    // CHECK: llvm.access_group @group1
-    llvm.access_group @group1
-    llvm.return
-  }
+// CHECK-LABEL: llvm.func @vararg_func
+llvm.func @vararg_func(%arg0: i32, ...) {
+  // CHECK: %{{.*}} = llvm.mlir.constant(1 : i32) : i32
+  // CHECK: %{{.*}} = llvm.mlir.constant(1 : i32) : i32
+  %0 = llvm.mlir.constant(1 : i32) : i32
+  %1 = llvm.mlir.constant(1 : i32) : i32
+  // CHECK: %[[ALLOCA0:.+]] = llvm.alloca %{{.*}} x !llvm.struct<"struct.va_list", (ptr<i8>)> {alignment = 8 : i64} : (i32) -> !llvm.ptr<struct<"struct.va_list", (ptr<i8>)>>
+  // CHECK: %[[CAST0:.+]] = llvm.bitcast %[[ALLOCA0]] : !llvm.ptr<struct<"struct.va_list", (ptr<i8>)>> to !llvm.ptr<i8>
+  %2 = llvm.alloca %1 x !llvm.struct<"struct.va_list", (ptr<i8>)> {alignment = 8 : i64} : (i32) -> !llvm.ptr<struct<"struct.va_list", (ptr<i8>)>>
+  %3 = llvm.bitcast %2 : !llvm.ptr<struct<"struct.va_list", (ptr<i8>)>> to !llvm.ptr<i8>
+  // CHECK: llvm.intr.vastart %[[CAST0]]
+  llvm.intr.vastart %3 : !llvm.ptr<i8>
+  // CHECK: %[[ALLOCA1:.+]] = llvm.alloca %{{.*}} x !llvm.ptr<i8> {alignment = 8 : i64} : (i32) -> !llvm.ptr<ptr<i8>>
+  // CHECK: %[[CAST1:.+]] = llvm.bitcast %[[ALLOCA1]] : !llvm.ptr<ptr<i8>> to !llvm.ptr<i8>
+  %4 = llvm.alloca %0 x !llvm.ptr<i8> {alignment = 8 : i64} : (i32) -> !llvm.ptr<ptr<i8>>
+  %5 = llvm.bitcast %4 : !llvm.ptr<ptr<i8>> to !llvm.ptr<i8>
+  // CHECK: llvm.intr.vacopy %[[CAST0]] to %[[CAST1]]
+  llvm.intr.vacopy %3 to %5 : !llvm.ptr<i8>, !llvm.ptr<i8>
+  // CHECK: llvm.intr.vaend %[[CAST1]]
+  // CHECK: llvm.intr.vaend %[[CAST0]]
+  llvm.intr.vaend %5 : !llvm.ptr<i8>
+  llvm.intr.vaend %3 : !llvm.ptr<i8>
+  // CHECK: llvm.return
+  llvm.return
+}
+
+// CHECK-LABEL: @lifetime
+// CHECK-SAME: %[[P:.*]]: !llvm.ptr
+llvm.func @lifetime(%p: !llvm.ptr) {
+  // CHECK: llvm.intr.lifetime.start 16, %[[P]]
+  llvm.intr.lifetime.start 16, %p : !llvm.ptr
+  // CHECK: llvm.intr.lifetime.end 16, %[[P]]
+  llvm.intr.lifetime.end 16, %p : !llvm.ptr
+  llvm.return
+}
+
+// CHECK-LABEL: @vararg_func_opaque_pointers
+llvm.func @vararg_func_opaque_pointers(%arg0: i32, ...) {
+  // CHECK: %[[C:.*]] = llvm.mlir.constant(1 : i32)
+  // CHECK: %[[LIST:.*]] = llvm.alloca
+  // CHECK: llvm.intr.vastart %[[LIST]] : !llvm.ptr{{$}}
+  %1 = llvm.mlir.constant(1 : i32) : i32
+  %list = llvm.alloca %1 x !llvm.struct<"struct.va_list_opaque", (ptr)> : (i32) -> !llvm.ptr
+  llvm.intr.vastart %list : !llvm.ptr
+
+  // CHECK: %[[LIST2:.*]] = llvm.alloca
+  // CHECK: llvm.intr.vacopy %[[LIST]] to %[[LIST2]] : !llvm.ptr, !llvm.ptr{{$}}
+  %list2 = llvm.alloca %1 x !llvm.struct<"struct.va_list_opaque", (ptr)> : (i32) -> !llvm.ptr
+  llvm.intr.vacopy %list to %list2 : !llvm.ptr, !llvm.ptr
+
+  // CHECK: llvm.intr.vaend %[[LIST]] : !llvm.ptr{{$}}
+  // CHECK: llvm.intr.vaend %[[LIST2]] : !llvm.ptr{{$}}
+  llvm.intr.vaend %list : !llvm.ptr
+  llvm.intr.vaend %list2 : !llvm.ptr
+  llvm.return
+}
+
+// CHECK-LABEL: @eh_typeid_opaque_pointers
+// CHECK-SAME: %[[ARG0:.*]]: !llvm.ptr
+llvm.func @eh_typeid_opaque_pointers(%arg0: !llvm.ptr) -> i32 {
+  // CHECK: llvm.intr.eh.typeid.for %[[ARG0]] : (!llvm.ptr) -> i32
+  %0 = llvm.intr.eh.typeid.for %arg0 : (!llvm.ptr) -> i32
+  llvm.return %0 : i32
+}
+
+// CHECK-LABEL: @stackrestore_opaque_pointers
+// CHECK-SAME: %[[ARG0:.*]]: !llvm.ptr
+llvm.func @stackrestore_opaque_pointers(%arg0: !llvm.ptr)  {
+  // CHECK: llvm.intr.stackrestore %[[ARG0]] : !llvm.ptr
+  llvm.intr.stackrestore %arg0 : !llvm.ptr
+  llvm.return
 }

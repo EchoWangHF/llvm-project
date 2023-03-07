@@ -5,6 +5,7 @@ set(LLVM_LINK_COMPONENTS
   MCDisassembler
   Object
   Support
+  TargetParser
   )
 
 add_llvm_library(LLVMBOLTCore
@@ -18,11 +19,13 @@ add_llvm_library(LLVMBOLTCore
   DebugData.cpp
   DynoStats.cpp
   Exceptions.cpp
+  FunctionLayout.cpp
   JumpTable.cpp
   MCPlusBuilder.cpp
   ParallelUtilities.cpp
   Relocation.cpp
 
+  DISABLE_LLVM_LINK_LLVM_DYLIB
   LINK_LIBS
   ${LLVM_PTHREAD_LIB}
   )

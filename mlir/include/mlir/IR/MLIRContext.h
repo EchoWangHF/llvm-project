@@ -20,15 +20,19 @@ class ThreadPool;
 } // namespace llvm
 
 namespace mlir {
-class DebugActionManager;
+namespace tracing {
+class ActionManager;
+}
 class DiagnosticEngine;
 class Dialect;
 class DialectRegistry;
+class DynamicDialect;
 class InFlightDiagnostic;
 class Location;
 class MLIRContextImpl;
 class RegisteredOperationName;
 class StorageUniquer;
+class IRUnit;
 
 /// MLIRContext is the top-level object for a collection of MLIR operations. It
 /// holds immortal uniqued objects like types, and the tables used to unique
@@ -100,15 +104,23 @@ public:
   /// Load a dialect in the context.
   template <typename Dialect>
   void loadDialect() {
-    getOrLoadDialect<Dialect>();
+    // Do not load the dialect if it is currently loading. This can happen if a
+    // dialect initializer triggers loading the same dialect recursively.
+    if (!isDialectLoading(Dialect::getDialectNamespace()))
+      getOrLoadDialect<Dialect>();
   }
 
   /// Load a list dialects in the context.
   template <typename Dialect, typename OtherDialect, typename... MoreDialects>
   void loadDialect() {
-    getOrLoadDialect<Dialect>();
+    loadDialect<Dialect>();
     loadDialect<OtherDialect, MoreDialects...>();
   }
+
+  /// Get (or create) a dynamic dialect for the given name.
+  DynamicDialect *
+  getOrLoadDynamicDialect(StringRef dialectNamespace,
+                          function_ref<void(DynamicDialect *)> ctor);
 
   /// Load all dialects available in the registry in this context.
   void loadAllAvailableDialects();
@@ -123,6 +135,10 @@ public:
   bool allowsUnregisteredDialects();
 
   /// Enables creating operations in unregistered dialects.
+  /// This option is **heavily discouraged**: it is convenient during testing
+  /// but it is not a good practice to use it in production code. Some system
+  /// invariants can be broken (like loading a dialect after creating
+  ///  operations) without being caught by assertions or other means.
   void allowUnregisteredDialects(bool allow = true);
 
   /// Return true if multi-threading is enabled by the context.
@@ -202,7 +218,7 @@ public:
   StorageUniquer &getAttributeUniquer();
 
   /// Returns the manager of debug actions within the context.
-  DebugActionManager &getDebugActionManager();
+  tracing::ActionManager &getActionManager();
 
   /// These APIs are tracking whether the context will be used in a
   /// multithreading environment: this has no effect other than enabling
@@ -227,6 +243,9 @@ public:
   llvm::hash_code getRegistryHash();
 
 private:
+  /// Return true if the given dialect is currently loading.
+  bool isDialectLoading(StringRef dialectNamespace);
+
   const std::unique_ptr<MLIRContextImpl> impl;
 
   MLIRContext(const MLIRContext &) = delete;

@@ -63,20 +63,6 @@ bool RecurrenceDescriptor::isFloatingPointRecurrenceKind(RecurKind Kind) {
   return (Kind != RecurKind::None) && !isIntegerRecurrenceKind(Kind);
 }
 
-bool RecurrenceDescriptor::isArithmeticRecurrenceKind(RecurKind Kind) {
-  switch (Kind) {
-  default:
-    break;
-  case RecurKind::Add:
-  case RecurKind::Mul:
-  case RecurKind::FAdd:
-  case RecurKind::FMul:
-  case RecurKind::FMulAdd:
-    return true;
-  }
-  return false;
-}
-
 /// Determines if Phi may have been type-promoted. If Phi has a single user
 /// that ANDs the Phi with a type mask, return the user. RT is updated to
 /// account for the narrower bit width represented by the mask, and the AND
@@ -121,7 +107,7 @@ static std::pair<Type *, bool> computeRecurrenceType(Instruction *Exit,
     // must be positive (i.e., IsSigned = false), because if this were not the
     // case, the sign bit would have been demanded.
     auto Mask = DB->getDemandedBits(Exit);
-    MaxBitWidth = Mask.getBitWidth() - Mask.countLeadingZeros();
+    MaxBitWidth = Mask.getBitWidth() - Mask.countl_zero();
   }
 
   if (MaxBitWidth == DL.getTypeSizeInBits(Exit->getType()) && AC && DT) {
@@ -142,8 +128,7 @@ static std::pair<Type *, bool> computeRecurrenceType(Instruction *Exit,
       ++MaxBitWidth;
     }
   }
-  if (!isPowerOf2_64(MaxBitWidth))
-    MaxBitWidth = NextPowerOf2(MaxBitWidth);
+  MaxBitWidth = llvm::bit_ceil(MaxBitWidth);
 
   return std::make_pair(Type::getIntNTy(Exit->getContext(), MaxBitWidth),
                         IsSigned);
@@ -760,15 +745,21 @@ RecurrenceDescriptor::isConditionalRdxPattern(RecurKind Kind, Instruction *I) {
     return InstDesc(false, I);
 
   Value *Op1, *Op2;
-  if ((m_FAdd(m_Value(Op1), m_Value(Op2)).match(I1)  ||
-       m_FSub(m_Value(Op1), m_Value(Op2)).match(I1)) &&
-      I1->isFast())
-    return InstDesc(Kind == RecurKind::FAdd, SI);
+  if (!(((m_FAdd(m_Value(Op1), m_Value(Op2)).match(I1) ||
+          m_FSub(m_Value(Op1), m_Value(Op2)).match(I1)) &&
+         I1->isFast()) ||
+        (m_FMul(m_Value(Op1), m_Value(Op2)).match(I1) && (I1->isFast())) ||
+        ((m_Add(m_Value(Op1), m_Value(Op2)).match(I1) ||
+          m_Sub(m_Value(Op1), m_Value(Op2)).match(I1))) ||
+        (m_Mul(m_Value(Op1), m_Value(Op2)).match(I1))))
+    return InstDesc(false, I);
 
-  if (m_FMul(m_Value(Op1), m_Value(Op2)).match(I1) && (I1->isFast()))
-    return InstDesc(Kind == RecurKind::FMul, SI);
+  Instruction *IPhi = isa<PHINode>(*Op1) ? dyn_cast<Instruction>(Op1)
+                                         : dyn_cast<Instruction>(Op2);
+  if (!IPhi || IPhi != FalseVal)
+    return InstDesc(false, I);
 
-  return InstDesc(false, I);
+  return InstDesc(true, SI);
 }
 
 RecurrenceDescriptor::InstDesc
@@ -801,9 +792,10 @@ RecurrenceDescriptor::isRecurrenceInstr(Loop *L, PHINode *OrigPhi,
     return InstDesc(Kind == RecurKind::FAdd, I,
                     I->hasAllowReassoc() ? nullptr : I);
   case Instruction::Select:
-    if (Kind == RecurKind::FAdd || Kind == RecurKind::FMul)
+    if (Kind == RecurKind::FAdd || Kind == RecurKind::FMul ||
+        Kind == RecurKind::Add || Kind == RecurKind::Mul)
       return isConditionalRdxPattern(Kind, I);
-    LLVM_FALLTHROUGH;
+    [[fallthrough]];
   case Instruction::FCmp:
   case Instruction::ICmp:
   case Instruction::Call:
@@ -935,7 +927,7 @@ bool RecurrenceDescriptor::isReductionPHI(PHINode *Phi, Loop *TheLoop,
   return false;
 }
 
-bool RecurrenceDescriptor::isFirstOrderRecurrence(
+bool RecurrenceDescriptor::isFixedOrderRecurrence(
     PHINode *Phi, Loop *TheLoop,
     MapVector<Instruction *, Instruction *> &SinkAfter, DominatorTree *DT) {
 
@@ -957,8 +949,22 @@ bool RecurrenceDescriptor::isFirstOrderRecurrence(
     return false;
 
   // Get the previous value. The previous value comes from the latch edge while
-  // the initial value comes form the preheader edge.
+  // the initial value comes from the preheader edge.
   auto *Previous = dyn_cast<Instruction>(Phi->getIncomingValueForBlock(Latch));
+
+  // If Previous is a phi in the header, go through incoming values from the
+  // latch until we find a non-phi value. Use this as the new Previous, all uses
+  // in the header will be dominated by the original phi, but need to be moved
+  // after the non-phi previous value.
+  SmallPtrSet<PHINode *, 4> SeenPhis;
+  while (auto *PrevPhi = dyn_cast_or_null<PHINode>(Previous)) {
+    if (PrevPhi->getParent() != Phi->getParent())
+      return false;
+    if (!SeenPhis.insert(PrevPhi).second)
+      return false;
+    Previous = dyn_cast<Instruction>(PrevPhi->getIncomingValueForBlock(Latch));
+  }
+
   if (!Previous || !TheLoop->contains(Previous) || isa<PHINode>(Previous) ||
       SinkAfter.count(Previous)) // Cannot rely on dominance due to motion.
     return false;
@@ -1000,7 +1006,7 @@ bool RecurrenceDescriptor::isFirstOrderRecurrence(
       return false;
 
     // Avoid sinking an instruction multiple times (if multiple operands are
-    // first order recurrences) by sinking once - after the latest 'previous'
+    // fixed order recurrences) by sinking once - after the latest 'previous'
     // instruction.
     auto It = SinkAfter.find(SinkCandidate);
     if (It != SinkAfter.end()) {
@@ -1025,6 +1031,16 @@ bool RecurrenceDescriptor::isFirstOrderRecurrence(
       // Previous. Nothing left to do.
       if (DT->dominates(Previous, OtherPrev) || Previous == OtherPrev)
         return true;
+
+      // If there are other instructions to be sunk after SinkCandidate, remove
+      // and re-insert SinkCandidate can break those instructions. Bail out for
+      // simplicity.
+      if (any_of(SinkAfter,
+          [SinkCandidate](const std::pair<Instruction *, Instruction *> &P) {
+            return P.second == SinkCandidate;
+          }))
+        return false;
+
       // Otherwise, Previous comes after OtherPrev and SinkCandidate needs to be
       // re-sunk to Previous, instead of sinking to OtherPrev. Remove
       // SinkCandidate from SinkAfter to ensure it's insert position is updated.
@@ -1101,9 +1117,13 @@ Value *RecurrenceDescriptor::getRecurrenceIdentity(RecurKind K, Type *Tp,
     return ConstantInt::get(Tp,
                             APInt::getSignedMinValue(Tp->getIntegerBitWidth()));
   case RecurKind::FMin:
-    return ConstantFP::getInfinity(Tp, true);
+    assert((FMF.noNaNs() && FMF.noSignedZeros()) &&
+           "nnan, nsz is expected to be set for FP min reduction.");
+    return ConstantFP::getInfinity(Tp, false /*Negative*/);
   case RecurKind::FMax:
-    return ConstantFP::getInfinity(Tp, false);
+    assert((FMF.noNaNs() && FMF.noSignedZeros()) &&
+           "nnan, nsz is expected to be set for FP max reduction.");
+    return ConstantFP::getInfinity(Tp, true /*Negative*/);
   case RecurKind::SelectICmp:
   case RecurKind::SelectFCmp:
     return getRecurrenceStartValue();
@@ -1170,7 +1190,7 @@ RecurrenceDescriptor::getReductionOpChain(PHINode *Phi, Loop *L) const {
     ExpectedUses = 2;
 
   auto getNextInstruction = [&](Instruction *Cur) -> Instruction * {
-    for (auto User : Cur->users()) {
+    for (auto *User : Cur->users()) {
       Instruction *UI = cast<Instruction>(User);
       if (isa<PHINode>(UI))
         continue;
@@ -1571,7 +1591,7 @@ bool InductionDescriptor::isInductionPHI(
   if (TySize.isZero() || TySize.isScalable())
     return false;
 
-  int64_t Size = static_cast<int64_t>(TySize.getFixedSize());
+  int64_t Size = static_cast<int64_t>(TySize.getFixedValue());
   int64_t CVSize = CV->getSExtValue();
   if (CVSize % Size)
     return false;

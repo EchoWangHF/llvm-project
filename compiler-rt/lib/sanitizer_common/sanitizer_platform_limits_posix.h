@@ -19,6 +19,20 @@
 #include "sanitizer_internal_defs.h"
 #include "sanitizer_platform.h"
 
+#if SANITIZER_APPLE
+#include <sys/cdefs.h>
+#if !__DARWIN_ONLY_64_BIT_INO_T
+#define SANITIZER_HAS_STAT64 1
+#define SANITIZER_HAS_STATFS64 1
+#else
+#define SANITIZER_HAS_STAT64 0
+#define SANITIZER_HAS_STATFS64 0
+#endif
+#elif SANITIZER_GLIBC || SANITIZER_ANDROID
+#define SANITIZER_HAS_STAT64 1
+#define SANITIZER_HAS_STATFS64 1
+#endif
+
 #if defined(__sparc__)
 // FIXME: This can't be included from tsan which does not support sparc yet.
 #include "sanitizer_glibc_version.h"
@@ -29,7 +43,7 @@
 namespace __sanitizer {
 extern unsigned struct_utsname_sz;
 extern unsigned struct_stat_sz;
-#if !SANITIZER_IOS
+#if SANITIZER_HAS_STAT64
 extern unsigned struct_stat64_sz;
 #endif
 extern unsigned struct_rusage_sz;
@@ -49,7 +63,9 @@ extern unsigned struct_itimerspec_sz;
 extern unsigned struct_sigevent_sz;
 extern unsigned struct_stack_t_sz;
 extern unsigned struct_sched_param_sz;
+#if SANITIZER_HAS_STATFS64
 extern unsigned struct_statfs64_sz;
+#endif
 extern unsigned struct_regex_sz;
 extern unsigned struct_regmatch_sz;
 
@@ -81,9 +97,10 @@ const unsigned struct_kernel_stat64_sz = 104;
 const unsigned struct_kernel_stat_sz = 144;
 const unsigned struct_kernel_stat64_sz = 104;
 #elif defined(__mips__)
-const unsigned struct_kernel_stat_sz = SANITIZER_ANDROID
-                                           ? FIRST_32_SECOND_64(104, 128)
-                                           : FIRST_32_SECOND_64(160, 216);
+const unsigned struct_kernel_stat_sz =
+    SANITIZER_ANDROID
+        ? FIRST_32_SECOND_64(104, 128)
+        : FIRST_32_SECOND_64((_MIPS_SIM == _ABIN32) ? 176 : 160, 216);
 const unsigned struct_kernel_stat64_sz = 104;
 #elif defined(__s390__) && !defined(__s390x__)
 const unsigned struct_kernel_stat_sz = 64;
@@ -105,6 +122,9 @@ const unsigned struct_kernel_stat64_sz = 0;  // RISCV64 does not use stat64
 #    elif defined(__hexagon__)
 const unsigned struct_kernel_stat_sz = 128;
 const unsigned struct_kernel_stat64_sz = 0;
+#    elif defined(__loongarch__)
+const unsigned struct_kernel_stat_sz = 128;
+const unsigned struct_kernel_stat64_sz = 0;
 #    endif
 struct __sanitizer_perf_event_attr {
   unsigned type;
@@ -115,7 +135,7 @@ struct __sanitizer_perf_event_attr {
 extern unsigned struct_epoll_event_sz;
 extern unsigned struct_sysinfo_sz;
 extern unsigned __user_cap_header_struct_sz;
-extern unsigned __user_cap_data_struct_sz;
+extern unsigned __user_cap_data_struct_sz(void *hdrp);
 extern unsigned struct_new_utsname_sz;
 extern unsigned struct_old_utsname_sz;
 extern unsigned struct_oldold_utsname_sz;
@@ -125,7 +145,7 @@ const unsigned struct_kexec_segment_sz = 4 * sizeof(unsigned long);
 
 #if SANITIZER_LINUX
 
-#if defined(__powerpc64__) || defined(__s390__)
+#if defined(__powerpc64__) || defined(__s390__) || defined(__loongarch__)
 const unsigned struct___old_kernel_stat_sz = 0;
 #elif !defined(__sparc__)
 const unsigned struct___old_kernel_stat_sz = 32;
@@ -496,7 +516,7 @@ struct __sanitizer_dirent {
 };
 #  endif
 
-#  if SANITIZER_LINUX && !SANITIZER_ANDROID
+#  if SANITIZER_GLIBC
 struct __sanitizer_dirent64 {
   unsigned long long d_ino;
   unsigned long long d_off;
@@ -566,10 +586,30 @@ struct __sanitizer_sigset_t {
 };
 #endif
 
-struct __sanitizer_siginfo {
-  // The size is determined by looking at sizeof of real siginfo_t on linux.
-  u64 opaque[128 / sizeof(u64)];
+struct __sanitizer_siginfo_pad {
+  // Require uptr, because siginfo_t is always pointer-size aligned on Linux.
+  uptr pad[128 / sizeof(uptr)];
 };
+
+#if SANITIZER_LINUX
+# define SANITIZER_HAS_SIGINFO 1
+union __sanitizer_siginfo {
+  struct {
+    int si_signo;
+# if SANITIZER_MIPS
+    int si_code;
+    int si_errno;
+# else
+    int si_errno;
+    int si_code;
+# endif
+  };
+  __sanitizer_siginfo_pad pad;
+};
+#else
+# define SANITIZER_HAS_SIGINFO 0
+typedef __sanitizer_siginfo_pad __sanitizer_siginfo;
+#endif
 
 using __sanitizer_sighandler_ptr = void (*)(int sig);
 using __sanitizer_sigactionhandler_ptr = void (*)(int sig,
@@ -822,7 +862,7 @@ typedef void __sanitizer_FILE;
 #if SANITIZER_LINUX && !SANITIZER_ANDROID &&                               \
     (defined(__i386) || defined(__x86_64) || defined(__mips64) ||          \
      defined(__powerpc64__) || defined(__aarch64__) || defined(__arm__) || \
-     defined(__s390__) || SANITIZER_RISCV64)
+     defined(__s390__) || defined(__loongarch__) || SANITIZER_RISCV64)
 extern unsigned struct_user_regs_struct_sz;
 extern unsigned struct_user_fpregs_struct_sz;
 extern unsigned struct_user_fpxregs_struct_sz;

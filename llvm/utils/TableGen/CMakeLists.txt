@@ -3,6 +3,8 @@ add_subdirectory(GlobalISel)
 set(LLVM_LINK_COMPONENTS Support)
 
 add_tablegen(llvm-tblgen LLVM
+  DESTINATION "${LLVM_TOOLS_INSTALL_DIR}"
+  EXPORT LLVM
   AsmMatcherEmitter.cpp
   AsmWriterEmitter.cpp
   AsmWriterInst.cpp
@@ -11,6 +13,7 @@ add_tablegen(llvm-tblgen LLVM
   CodeEmitterGen.cpp
   CodeGenDAGPatterns.cpp
   CodeGenHwModes.cpp
+  CodeGenInstAlias.cpp
   CodeGenInstruction.cpp
   CodeGenMapTable.cpp
   CodeGenRegisters.cpp
@@ -43,6 +46,7 @@ add_tablegen(llvm-tblgen LLVM
   CompressInstEmitter.cpp
   RegisterBankEmitter.cpp
   RegisterInfoEmitter.cpp
+  RISCVTargetDefEmitter.cpp
   SDNodeProperties.cpp
   SearchableTableEmitter.cpp
   SubtargetEmitter.cpp

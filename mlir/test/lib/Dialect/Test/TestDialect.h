@@ -14,6 +14,7 @@
 #ifndef MLIR_TESTDIALECT_H
 #define MLIR_TESTDIALECT_H
 
+#include "TestTypes.h"
 #include "TestAttributes.h"
 #include "TestInterfaces.h"
 #include "mlir/Dialect/DLTI/DLTI.h"
@@ -21,9 +22,11 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Traits.h"
+#include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dialect.h"
+#include "mlir/IR/DialectResourceBlobManager.h"
 #include "mlir/IR/ExtensibleDialect.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/OpImplementation.h"
@@ -44,14 +47,34 @@ class DLTIDialect;
 class RewritePatternSet;
 } // namespace mlir
 
+//===----------------------------------------------------------------------===//
+// TestDialect
+//===----------------------------------------------------------------------===//
+
 #include "TestOpInterfaces.h.inc"
-#include "TestOpStructs.h.inc"
 #include "TestOpsDialect.h.inc"
 
 #define GET_OP_CLASSES
 #include "TestOps.h.inc"
 
 namespace test {
+
+// Op deliberately defined in C++ code rather than ODS to test that C++
+// Ops can still use the old `fold` method.
+class ManualCppOpWithFold
+    : public mlir::Op<ManualCppOpWithFold, mlir::OpTrait::OneResult> {
+public:
+  using Op::Op;
+
+  static llvm::StringRef getOperationName() {
+    return "test.manual_cpp_op_with_fold";
+  }
+
+  static llvm::ArrayRef<llvm::StringRef> getAttributeNames() { return {}; }
+
+  mlir::OpFoldResult fold(llvm::ArrayRef<mlir::Attribute> attributes);
+};
+
 void registerTestDialect(::mlir::DialectRegistry &registry);
 void populateTestReductionPatterns(::mlir::RewritePatternSet &patterns);
 } // namespace test

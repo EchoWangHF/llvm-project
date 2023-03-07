@@ -14,6 +14,7 @@
 #include "flang/Common/Fortran-features.h"
 #include "flang/Evaluate/common.h"
 #include "flang/Evaluate/intrinsics.h"
+#include "flang/Evaluate/target.h"
 #include "flang/Parser/message.h"
 #include <iosfwd>
 #include <set>
@@ -96,6 +97,12 @@ public:
   bool warningsAreErrors() const { return warningsAreErrors_; }
   bool debugModuleWriter() const { return debugModuleWriter_; }
   const evaluate::IntrinsicProcTable &intrinsics() const { return intrinsics_; }
+  const evaluate::TargetCharacteristics &targetCharacteristics() const {
+    return targetCharacteristics_;
+  }
+  evaluate::TargetCharacteristics &targetCharacteristics() {
+    return targetCharacteristics_;
+  }
   Scope &globalScope() { return globalScope_; }
   Scope &intrinsicModulesScope() { return intrinsicModulesScope_; }
   parser::Messages &messages() { return messages_; }
@@ -138,6 +145,14 @@ public:
     return *this;
   }
 
+  bool anyDefinedIntrinsicOperator() const {
+    return anyDefinedIntrinsicOperator_;
+  }
+  SemanticsContext &set_anyDefinedIntrinsicOperator(bool yes = true) {
+    anyDefinedIntrinsicOperator_ = yes;
+    return *this;
+  }
+
   const DeclTypeSpec &MakeNumericType(TypeCategory, int kind = 0);
   const DeclTypeSpec &MakeLogicalType(int kind = 0);
 
@@ -161,10 +176,12 @@ public:
     return messages_.Say(std::move(msg));
   }
   template <typename... A>
-  void SayWithDecl(const Symbol &symbol, const parser::CharBlock &at,
-      parser::MessageFixedText &&msg, A &&...args) {
+  parser::Message &SayWithDecl(const Symbol &symbol,
+      const parser::CharBlock &at, parser::MessageFixedText &&msg,
+      A &&...args) {
     auto &message{Say(at, std::move(msg), args...)};
     evaluate::AttachDeclaration(&message, symbol);
+    return message;
   }
 
   const Scope &FindScope(parser::CharBlock) const;
@@ -198,6 +215,9 @@ public:
   // Defines builtinsScope_ from the __Fortran_builtins module
   void UseFortranBuiltinsModule();
   const Scope *GetBuiltinsScope() const { return builtinsScope_; }
+
+  void UsePPCFortranBuiltinsModule();
+  const Scope *GetPPCBuiltinsScope() const { return ppcBuiltinsScope_; }
 
   // Saves a module file's parse tree so that it remains available
   // during semantics.
@@ -244,6 +264,7 @@ private:
   bool warningsAreErrors_{false};
   bool debugModuleWriter_{false};
   const evaluate::IntrinsicProcTable intrinsics_;
+  evaluate::TargetCharacteristics targetCharacteristics_;
   Scope globalScope_;
   Scope &intrinsicModulesScope_;
   parser::Messages messages_;
@@ -258,8 +279,10 @@ private:
   UnorderedSymbolSet errorSymbols_;
   std::set<std::string> tempNames_;
   const Scope *builtinsScope_{nullptr}; // module __Fortran_builtins
+  const Scope *ppcBuiltinsScope_{nullptr}; // module __Fortran_PPC_intrinsics
   std::list<parser::Program> modFileParseTrees_;
   std::unique_ptr<CommonBlockMap> commonBlockMap_;
+  bool anyDefinedIntrinsicOperator_{false};
 };
 
 class Semantics {

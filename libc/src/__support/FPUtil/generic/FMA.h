@@ -9,24 +9,25 @@
 #ifndef LLVM_LIBC_SRC_SUPPORT_FPUTIL_GENERIC_FMA_H
 #define LLVM_LIBC_SRC_SUPPORT_FPUTIL_GENERIC_FMA_H
 
-#include "src/__support/CPP/Bit.h"
-#include "src/__support/CPP/TypeTraits.h"
+#include "src/__support/CPP/type_traits.h"
 #include "src/__support/FPUtil/FEnvImpl.h"
 #include "src/__support/FPUtil/FPBits.h"
 #include "src/__support/FPUtil/FloatProperties.h"
-#include "src/__support/FPUtil/builtin_wrappers.h"
-#include "src/__support/common.h"
+#include "src/__support/UInt128.h"
+#include "src/__support/builtin_wrappers.h"
+#include "src/__support/macros/attributes.h"   // LIBC_INLINE
+#include "src/__support/macros/optimization.h" // LIBC_UNLIKELY
 
 namespace __llvm_libc {
 namespace fputil {
 namespace generic {
 
-template <typename T> static inline T fma(T x, T y, T z);
+template <typename T> LIBC_INLINE T fma(T x, T y, T z);
 
 // TODO(lntue): Implement fmaf that is correctly rounded to all rounding modes.
 // The implementation below only is only correct for the default rounding mode,
 // round-to-nearest tie-to-even.
-template <> inline float fma<float>(float x, float y, float z) {
+template <> LIBC_INLINE float fma<float>(float x, float y, float z) {
   // Product is exact.
   double prod = static_cast<double>(x) * static_cast<double>(y);
   double z_d = static_cast<double>(z);
@@ -78,12 +79,12 @@ namespace internal {
 
 // Extract the sticky bits and shift the `mantissa` to the right by
 // `shift_length`.
-static inline bool shift_mantissa(int shift_length, __uint128_t &mant) {
+LIBC_INLINE bool shift_mantissa(int shift_length, UInt128 &mant) {
   if (shift_length >= 128) {
     mant = 0;
     return true; // prod_mant is non-zero.
   }
-  __uint128_t mask = (__uint128_t(1) << shift_length) - 1;
+  UInt128 mask = (UInt128(1) << shift_length) - 1;
   bool sticky_bits = (mant & mask) != 0;
   mant >>= shift_length;
   return sticky_bits;
@@ -91,11 +92,11 @@ static inline bool shift_mantissa(int shift_length, __uint128_t &mant) {
 
 } // namespace internal
 
-template <> inline double fma<double>(double x, double y, double z) {
+template <> LIBC_INLINE double fma<double>(double x, double y, double z) {
   using FPBits = fputil::FPBits<double>;
   using FloatProp = fputil::FloatProperties<double>;
 
-  if (unlikely(x == 0 || y == 0 || z == 0)) {
+  if (LIBC_UNLIKELY(x == 0 || y == 0 || z == 0)) {
     return x * y + z;
   }
 
@@ -104,15 +105,15 @@ template <> inline double fma<double>(double x, double y, double z) {
   int z_exp = 0;
 
   // Normalize denormal inputs.
-  if (unlikely(FPBits(x).get_unbiased_exponent() == 0)) {
+  if (LIBC_UNLIKELY(FPBits(x).get_unbiased_exponent() == 0)) {
     x_exp -= 52;
     x *= 0x1.0p+52;
   }
-  if (unlikely(FPBits(y).get_unbiased_exponent() == 0)) {
+  if (LIBC_UNLIKELY(FPBits(y).get_unbiased_exponent() == 0)) {
     y_exp -= 52;
     y *= 0x1.0p+52;
   }
-  if (unlikely(FPBits(z).get_unbiased_exponent() == 0)) {
+  if (LIBC_UNLIKELY(FPBits(z).get_unbiased_exponent() == 0)) {
     z_exp -= 52;
     z *= 0x1.0p+52;
   }
@@ -126,14 +127,15 @@ template <> inline double fma<double>(double x, double y, double z) {
   y_exp += y_bits.get_unbiased_exponent();
   z_exp += z_bits.get_unbiased_exponent();
 
-  if (unlikely(x_exp == FPBits::MAX_EXPONENT || y_exp == FPBits::MAX_EXPONENT ||
-               z_exp == FPBits::MAX_EXPONENT))
+  if (LIBC_UNLIKELY(x_exp == FPBits::MAX_EXPONENT ||
+                    y_exp == FPBits::MAX_EXPONENT ||
+                    z_exp == FPBits::MAX_EXPONENT))
     return x * y + z;
 
   // Extract mantissa and append hidden leading bits.
-  __uint128_t x_mant = x_bits.get_mantissa() | FPBits::MIN_NORMAL;
-  __uint128_t y_mant = y_bits.get_mantissa() | FPBits::MIN_NORMAL;
-  __uint128_t z_mant = z_bits.get_mantissa() | FPBits::MIN_NORMAL;
+  UInt128 x_mant = x_bits.get_mantissa() | FPBits::MIN_NORMAL;
+  UInt128 y_mant = y_bits.get_mantissa() | FPBits::MIN_NORMAL;
+  UInt128 z_mant = z_bits.get_mantissa() | FPBits::MIN_NORMAL;
 
   // If the exponent of the product x*y > the exponent of z, then no extra
   // precision beside the entire product x*y is needed.  On the other hand, when
@@ -154,7 +156,7 @@ template <> inline double fma<double>(double x, double y, double z) {
   // the original mantissa as high part when constructing 128-bit z_mant. So the
   // mantissa of prod will be left-shifted by 64 - 54 = 10 initially.
 
-  __uint128_t prod_mant = x_mant * y_mant << 10;
+  UInt128 prod_mant = x_mant * y_mant << 10;
   int prod_lsb_exp =
       x_exp + y_exp -
       (FPBits::EXPONENT_BIAS + 2 * MantissaWidth<double>::VALUE + 10);
@@ -206,8 +208,9 @@ template <> inline double fma<double>(double x, double y, double z) {
   // Normalize the result.
   if (prod_mant != 0) {
     uint64_t prod_hi = static_cast<uint64_t>(prod_mant >> 64);
-    int lead_zeros =
-        prod_hi ? clz(prod_hi) : 64 + clz(static_cast<uint64_t>(prod_mant));
+    int lead_zeros = prod_hi
+                         ? unsafe_clz(prod_hi)
+                         : 64 + unsafe_clz(static_cast<uint64_t>(prod_mant));
     // Move the leading 1 to the most significant bit.
     prod_mant <<= lead_zeros;
     // The lower 64 bits are always sticky bits after moving the leading 1 to
@@ -252,12 +255,13 @@ template <> inline double fma<double>(double x, double y, double z) {
 
   // Finalize the result.
   int round_mode = fputil::get_round();
-  if (unlikely(r_exp >= FPBits::MAX_EXPONENT)) {
+  if (LIBC_UNLIKELY(r_exp >= FPBits::MAX_EXPONENT)) {
     if ((round_mode == FE_TOWARDZERO) ||
         (round_mode == FE_UPWARD && prod_sign) ||
         (round_mode == FE_DOWNWARD && !prod_sign)) {
       result = FPBits::MAX_NORMAL;
-      return prod_sign ? -bit_cast<double>(result) : bit_cast<double>(result);
+      return prod_sign ? -cpp::bit_cast<double>(result)
+                       : cpp::bit_cast<double>(result);
     }
     return prod_sign ? static_cast<double>(FPBits::neg_inf())
                      : static_cast<double>(FPBits::inf());
@@ -280,7 +284,7 @@ template <> inline double fma<double>(double x, double y, double z) {
       ++result;
   }
 
-  return bit_cast<double>(result);
+  return cpp::bit_cast<double>(result);
 }
 
 } // namespace generic

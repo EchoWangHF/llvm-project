@@ -9,6 +9,8 @@
 #include "mlir-c/IR.h"
 #include "mlir-c/Support.h"
 
+#include "mlir/AsmParser/AsmParser.h"
+#include "mlir/Bytecode/BytecodeWriter.h"
 #include "mlir/CAPI/IR.h"
 #include "mlir/CAPI/Support.h"
 #include "mlir/CAPI/Utils.h"
@@ -22,8 +24,8 @@
 #include "mlir/Interfaces/InferTypeOpInterface.h"
 #include "mlir/Parser/Parser.h"
 
-#include "llvm/Support/Debug.h"
 #include <cstddef>
+#include <optional>
 
 using namespace mlir;
 
@@ -77,6 +79,10 @@ void mlirContextEnableMultithreading(MlirContext context, bool enable) {
   return unwrap(context)->enableMultithreading(enable);
 }
 
+void mlirContextLoadAllAvailableDialects(MlirContext context) {
+  unwrap(context)->loadAllAvailableDialects();
+}
+
 //===----------------------------------------------------------------------===//
 // Dialect API.
 //===----------------------------------------------------------------------===//
@@ -122,9 +128,9 @@ void mlirOpPrintingFlagsElideLargeElementsAttrs(MlirOpPrintingFlags flags,
   unwrap(flags)->elideLargeElementsAttrs(largeElementLimit);
 }
 
-void mlirOpPrintingFlagsEnableDebugInfo(MlirOpPrintingFlags flags,
+void mlirOpPrintingFlagsEnableDebugInfo(MlirOpPrintingFlags flags, bool enable,
                                         bool prettyForm) {
-  unwrap(flags)->enableDebugInfo(/*prettyForm=*/prettyForm);
+  unwrap(flags)->enableDebugInfo(enable, /*prettyForm=*/prettyForm);
 }
 
 void mlirOpPrintingFlagsPrintGenericOpForm(MlirOpPrintingFlags flags) {
@@ -135,9 +141,21 @@ void mlirOpPrintingFlagsUseLocalScope(MlirOpPrintingFlags flags) {
   unwrap(flags)->useLocalScope();
 }
 
+void mlirOpPrintingFlagsAssumeVerified(MlirOpPrintingFlags flags) {
+  unwrap(flags)->assumeVerified();
+}
+
 //===----------------------------------------------------------------------===//
 // Location API.
 //===----------------------------------------------------------------------===//
+
+MlirAttribute mlirLocationGetAttribute(MlirLocation location) {
+  return wrap(LocationAttr(unwrap(location)));
+}
+
+MlirLocation mlirLocationFromAttribute(MlirAttribute attribute) {
+  return wrap(Location(unwrap(attribute).cast<LocationAttr>()));
+}
 
 MlirLocation mlirLocationFileLineColGet(MlirContext context,
                                         MlirStringRef filename, unsigned line,
@@ -283,7 +301,7 @@ void mlirOperationStateEnableResultTypeInference(MlirOperationState *state) {
 
 static LogicalResult inferOperationTypes(OperationState &state) {
   MLIRContext *context = state.getContext();
-  Optional<RegisteredOperationName> info = state.name.getRegisteredInfo();
+  std::optional<RegisteredOperationName> info = state.name.getRegisteredInfo();
   if (!info) {
     emitError(state.location)
         << "type inference was requested for the operation " << state.name
@@ -348,6 +366,15 @@ MlirOperation mlirOperationCreate(MlirOperationState *state) {
 
   MlirOperation result = wrap(Operation::create(cppState));
   return result;
+}
+
+MlirOperation mlirOperationCreateParse(MlirContext context,
+                                       MlirStringRef sourceStr,
+                                       MlirStringRef sourceName) {
+
+  return wrap(
+      parseSourceString(unwrap(sourceStr), unwrap(context), unwrap(sourceName))
+          .release());
 }
 
 MlirOperation mlirOperationClone(MlirOperation op) {
@@ -478,6 +505,12 @@ void mlirOperationPrintWithFlags(MlirOperation op, MlirOpPrintingFlags flags,
                                  MlirStringCallback callback, void *userData) {
   detail::CallbackOstream stream(callback, userData);
   unwrap(op)->print(stream, *unwrap(flags));
+}
+
+void mlirOperationWriteBytecode(MlirOperation op, MlirStringCallback callback,
+                                void *userData) {
+  detail::CallbackOstream stream(callback, userData);
+  writeBytecodeToFile(unwrap(op), stream);
 }
 
 void mlirOperationDump(MlirOperation op) { return unwrap(op)->dump(); }
@@ -708,6 +741,43 @@ void mlirValuePrint(MlirValue value, MlirStringCallback callback,
   unwrap(value).print(stream);
 }
 
+MlirOpOperand mlirValueGetFirstUse(MlirValue value) {
+  Value cppValue = unwrap(value);
+  if (cppValue.use_empty())
+    return {};
+
+  OpOperand *opOperand = cppValue.use_begin().getOperand();
+
+  return wrap(opOperand);
+}
+
+//===----------------------------------------------------------------------===//
+// OpOperand API.
+//===----------------------------------------------------------------------===//
+
+bool mlirOpOperandIsNull(MlirOpOperand opOperand) { return !opOperand.ptr; }
+
+MlirOperation mlirOpOperandGetOwner(MlirOpOperand opOperand) {
+  return wrap(unwrap(opOperand)->getOwner());
+}
+
+unsigned mlirOpOperandGetOperandNumber(MlirOpOperand opOperand) {
+  return unwrap(opOperand)->getOperandNumber();
+}
+
+MlirOpOperand mlirOpOperandGetNextUse(MlirOpOperand opOperand) {
+  if (mlirOpOperandIsNull(opOperand))
+    return {};
+
+  OpOperand *nextOpOperand = static_cast<OpOperand *>(
+      unwrap(opOperand)->getNextOperandUsingThisValue());
+
+  if (!nextOpOperand)
+    return {};
+
+  return wrap(nextOpOperand);
+}
+
 //===----------------------------------------------------------------------===//
 // Type API.
 //===----------------------------------------------------------------------===//
@@ -748,7 +818,10 @@ MlirContext mlirAttributeGetContext(MlirAttribute attribute) {
 }
 
 MlirType mlirAttributeGetType(MlirAttribute attribute) {
-  return wrap(unwrap(attribute).getType());
+  Attribute attr = unwrap(attribute);
+  if (auto typedAttr = attr.dyn_cast<TypedAttr>())
+    return wrap(typedAttr.getType());
+  return wrap(NoneType::get(attr.getContext()));
 }
 
 MlirTypeID mlirAttributeGetTypeID(MlirAttribute attr) {

@@ -13,6 +13,7 @@
 #include "TraceIntelPT.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
 #include "lldb/Interpreter/CommandReturnObject.h"
+#include <optional>
 
 namespace lldb_private {
 namespace trace_intel_pt {
@@ -33,7 +34,7 @@ public:
 
     uint64_t m_ipt_trace_size;
     bool m_enable_tsc;
-    llvm::Optional<uint64_t> m_psb_period;
+    std::optional<uint64_t> m_psb_period;
   };
 
   CommandObjectThreadTraceStartIntelPT(TraceIntelPT &trace,
@@ -77,8 +78,9 @@ public:
     uint64_t m_ipt_trace_size;
     uint64_t m_process_buffer_size_limit;
     bool m_enable_tsc;
-    llvm::Optional<uint64_t> m_psb_period;
+    std::optional<uint64_t> m_psb_period;
     bool m_per_cpu_tracing;
+    bool m_disable_cgroup_filtering;
   };
 
   CommandObjectProcessTraceStartIntelPT(TraceIntelPT &trace,
@@ -108,6 +110,23 @@ protected:
   TraceIntelPT &m_trace;
   CommandOptions m_options;
 };
+
+namespace ParsingUtils {
+/// Convert an integral size expression like 12KiB or 4MB into bytes. The units
+/// are taken loosely to help users input sizes into LLDB, e.g. KiB and KB are
+/// considered the same (2^20 bytes) for simplicity.
+///
+/// \param[in] size_expression
+///     String expression which is an integral number plus a unit that can be
+///     lower or upper case. Supported units: K, KB and KiB for 2^10 bytes; M,
+///     MB and MiB for 2^20 bytes; and B for bytes. A single integral number is
+///     considered bytes.
+/// \return
+///   The converted number of bytes or \a std::nullopt if the expression is
+///   invalid.
+std::optional<uint64_t>
+ParseUserFriendlySizeExpression(llvm::StringRef size_expression);
+} // namespace ParsingUtils
 
 } // namespace trace_intel_pt
 } // namespace lldb_private

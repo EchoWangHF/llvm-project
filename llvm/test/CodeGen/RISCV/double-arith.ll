@@ -196,8 +196,8 @@ define i32 @fneg_d(double %a, double %b) nounwind {
 ; RV32I-NEXT:    mv a2, a0
 ; RV32I-NEXT:    mv a3, a1
 ; RV32I-NEXT:    call __adddf3@plt
-; RV32I-NEXT:    lui a2, 524288
-; RV32I-NEXT:    xor a3, a1, a2
+; RV32I-NEXT:    lui a3, 524288
+; RV32I-NEXT:    xor a3, a1, a3
 ; RV32I-NEXT:    mv a2, a0
 ; RV32I-NEXT:    call __eqdf2@plt
 ; RV32I-NEXT:    seqz a0, a0
@@ -423,8 +423,8 @@ define double @fmsub_d(double %a, double %b, double %c) nounwind {
 ; RV32I-NEXT:    li a3, 0
 ; RV32I-NEXT:    call __adddf3@plt
 ; RV32I-NEXT:    mv a4, a0
-; RV32I-NEXT:    lui a0, 524288
-; RV32I-NEXT:    xor a5, a1, a0
+; RV32I-NEXT:    lui a5, 524288
+; RV32I-NEXT:    xor a5, a1, a5
 ; RV32I-NEXT:    mv a0, s3
 ; RV32I-NEXT:    mv a1, s2
 ; RV32I-NEXT:    mv a2, s1
@@ -508,9 +508,9 @@ define double @fnmadd_d(double %a, double %b, double %c) nounwind {
 ; RV32I-NEXT:    li a3, 0
 ; RV32I-NEXT:    call __adddf3@plt
 ; RV32I-NEXT:    mv a4, a0
-; RV32I-NEXT:    lui a0, 524288
-; RV32I-NEXT:    xor a2, s5, a0
-; RV32I-NEXT:    xor a5, a1, a0
+; RV32I-NEXT:    lui a5, 524288
+; RV32I-NEXT:    xor a2, s5, a5
+; RV32I-NEXT:    xor a5, a1, a5
 ; RV32I-NEXT:    mv a0, s4
 ; RV32I-NEXT:    mv a1, a2
 ; RV32I-NEXT:    mv a2, s3
@@ -606,9 +606,9 @@ define double @fnmadd_d_2(double %a, double %b, double %c) nounwind {
 ; RV32I-NEXT:    li a3, 0
 ; RV32I-NEXT:    call __adddf3@plt
 ; RV32I-NEXT:    mv a4, a0
-; RV32I-NEXT:    lui a0, 524288
-; RV32I-NEXT:    xor a3, s5, a0
-; RV32I-NEXT:    xor a5, a1, a0
+; RV32I-NEXT:    lui a5, 524288
+; RV32I-NEXT:    xor a3, s5, a5
+; RV32I-NEXT:    xor a5, a1, a5
 ; RV32I-NEXT:    mv a0, s3
 ; RV32I-NEXT:    mv a1, s2
 ; RV32I-NEXT:    mv a2, s4
@@ -660,17 +660,11 @@ define double @fnmadd_d_2(double %a, double %b, double %c) nounwind {
 }
 
 define double @fnmadd_d_3(double %a, double %b, double %c) nounwind {
-; RV32IFD-LABEL: fnmadd_d_3:
-; RV32IFD:       # %bb.0:
-; RV32IFD-NEXT:    fmadd.d ft0, fa0, fa1, fa2
-; RV32IFD-NEXT:    fneg.d fa0, ft0
-; RV32IFD-NEXT:    ret
-;
-; RV64IFD-LABEL: fnmadd_d_3:
-; RV64IFD:       # %bb.0:
-; RV64IFD-NEXT:    fmadd.d ft0, fa0, fa1, fa2
-; RV64IFD-NEXT:    fneg.d fa0, ft0
-; RV64IFD-NEXT:    ret
+; CHECKIFD-LABEL: fnmadd_d_3:
+; CHECKIFD:       # %bb.0:
+; CHECKIFD-NEXT:    fmadd.d ft0, fa0, fa1, fa2
+; CHECKIFD-NEXT:    fneg.d fa0, ft0
+; CHECKIFD-NEXT:    ret
 ;
 ; RV32I-LABEL: fnmadd_d_3:
 ; RV32I:       # %bb.0:
@@ -701,15 +695,10 @@ define double @fnmadd_d_3(double %a, double %b, double %c) nounwind {
 
 
 define double @fnmadd_nsz(double %a, double %b, double %c) nounwind {
-; RV32IFD-LABEL: fnmadd_nsz:
-; RV32IFD:       # %bb.0:
-; RV32IFD-NEXT:    fnmadd.d fa0, fa0, fa1, fa2
-; RV32IFD-NEXT:    ret
-;
-; RV64IFD-LABEL: fnmadd_nsz:
-; RV64IFD:       # %bb.0:
-; RV64IFD-NEXT:    fnmadd.d fa0, fa0, fa1, fa2
-; RV64IFD-NEXT:    ret
+; CHECKIFD-LABEL: fnmadd_nsz:
+; CHECKIFD:       # %bb.0:
+; CHECKIFD-NEXT:    fnmadd.d fa0, fa0, fa1, fa2
+; CHECKIFD-NEXT:    ret
 ;
 ; RV32I-LABEL: fnmadd_nsz:
 ; RV32I:       # %bb.0:
@@ -843,8 +832,8 @@ define double @fnmsub_d_2(double %a, double %b, double %c) nounwind {
 ; RV32I-NEXT:    li a3, 0
 ; RV32I-NEXT:    call __adddf3@plt
 ; RV32I-NEXT:    mv a2, a0
-; RV32I-NEXT:    lui a0, 524288
-; RV32I-NEXT:    xor a3, a1, a0
+; RV32I-NEXT:    lui a3, 524288
+; RV32I-NEXT:    xor a3, a1, a3
 ; RV32I-NEXT:    mv a0, s3
 ; RV32I-NEXT:    mv a1, s2
 ; RV32I-NEXT:    mv a4, s1

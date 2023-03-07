@@ -234,7 +234,8 @@ MIRParserImpl::parseIRModule(DataLayoutCallbackTy DataLayoutCallback) {
     // Create an empty module when the MIR file is empty.
     NoMIRDocuments = true;
     auto M = std::make_unique<Module>(Filename, Context);
-    if (auto LayoutOverride = DataLayoutCallback(M->getTargetTriple()))
+    if (auto LayoutOverride =
+            DataLayoutCallback(M->getTargetTriple(), M->getDataLayoutStr()))
       M->setDataLayout(*LayoutOverride);
     return M;
   }
@@ -257,7 +258,8 @@ MIRParserImpl::parseIRModule(DataLayoutCallbackTy DataLayoutCallback) {
   } else {
     // Create an new, empty module.
     M = std::make_unique<Module>(Filename, Context);
-    if (auto LayoutOverride = DataLayoutCallback(M->getTargetTriple()))
+    if (auto LayoutOverride =
+            DataLayoutCallback(M->getTargetTriple(), M->getDataLayoutStr()))
       M->setDataLayout(*LayoutOverride);
     NoLLVMIR = true;
   }
@@ -437,10 +439,13 @@ void MIRParserImpl::setupDebugValueTracking(
   MF.setDebugInstrNumberingCount(MaxInstrNum);
 
   // Load any substitutions.
-  for (auto &Sub : YamlMF.DebugValueSubstitutions) {
+  for (const auto &Sub : YamlMF.DebugValueSubstitutions) {
     MF.makeDebugValueSubstitution({Sub.SrcInst, Sub.SrcOp},
                                   {Sub.DstInst, Sub.DstOp}, Sub.Subreg);
   }
+
+  // Flag for whether we're supposed to be using DBG_INSTR_REF.
+  MF.setUseDebugInstrRef(YamlMF.UseDebugInstrRef);
 }
 
 bool
@@ -643,7 +648,7 @@ bool MIRParserImpl::parseRegisterInfo(PerFunctionMIParsingState &PFS,
   // be saved for the caller).
   if (YamlMF.CalleeSavedRegisters) {
     SmallVector<MCPhysReg, 16> CalleeSavedRegisters;
-    for (const auto &RegSource : YamlMF.CalleeSavedRegisters.getValue()) {
+    for (const auto &RegSource : *YamlMF.CalleeSavedRegisters) {
       Register Reg;
       if (parseNamedRegisterReference(PFS, Reg, RegSource.Value, Error))
         return error(Error, RegSource.SourceRange);
@@ -659,9 +664,11 @@ bool MIRParserImpl::setupRegisterInfo(const PerFunctionMIParsingState &PFS,
                                       const yaml::MachineFunction &YamlMF) {
   MachineFunction &MF = PFS.MF;
   MachineRegisterInfo &MRI = MF.getRegInfo();
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+
   bool Error = false;
   // Create VRegs
-  auto populateVRegInfo = [&] (const VRegInfo &Info, Twine Name) {
+  auto populateVRegInfo = [&](const VRegInfo &Info, Twine Name) {
     Register Reg = Info.VReg;
     switch (Info.Kind) {
     case VRegInfo::UNKNOWN:
@@ -670,6 +677,14 @@ bool MIRParserImpl::setupRegisterInfo(const PerFunctionMIParsingState &PFS,
       Error = true;
       break;
     case VRegInfo::NORMAL:
+      if (!Info.D.RC->isAllocatable()) {
+        error(Twine("Cannot use non-allocatable class '") +
+              TRI->getRegClassName(Info.D.RC) + "' for virtual register " +
+              Name + " in function '" + MF.getName() + "'");
+        Error = true;
+        break;
+      }
+
       MRI.setRegClass(Reg, Info.D.RC);
       if (Info.PreferredReg != 0)
         MRI.setSimpleHint(Reg, Info.PreferredReg);
@@ -695,7 +710,6 @@ bool MIRParserImpl::setupRegisterInfo(const PerFunctionMIParsingState &PFS,
   // Compute MachineRegisterInfo::UsedPhysRegMask
   for (const MachineBasicBlock &MBB : MF) {
     // Make sure MRI knows about registers clobbered by unwinder.
-    const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
     if (MBB.isEHPad())
       if (auto *RegMask = TRI->getCustomEHPadPreservedMask(MF))
         MRI.addPhysRegsUsedFromRegMask(RegMask);
@@ -814,7 +828,7 @@ bool MIRParserImpl::initializeFrameInfo(PerFunctionMIParsingState &PFS,
                                  Object.CalleeSavedRestored, ObjectIdx))
       return true;
     if (Object.LocalOffset)
-      MFI.mapLocalFrameObject(ObjectIdx, Object.LocalOffset.getValue());
+      MFI.mapLocalFrameObject(ObjectIdx, *Object.LocalOffset);
     if (parseStackObjectsDebugInfo(PFS, Object, ObjectIdx))
       return true;
   }
@@ -975,7 +989,7 @@ bool MIRParserImpl::parseMachineMetadata(PerFunctionMIParsingState &PFS,
 bool MIRParserImpl::parseMachineMetadataNodes(
     PerFunctionMIParsingState &PFS, MachineFunction &MF,
     const yaml::MachineFunction &YMF) {
-  for (auto &MDS : YMF.MachineMetadataNodes) {
+  for (const auto &MDS : YMF.MachineMetadataNodes) {
     if (parseMachineMetadata(PFS, MDS))
       return true;
   }
@@ -999,7 +1013,7 @@ SMDiagnostic MIRParserImpl::diagFromMIStringDiag(const SMDiagnostic &Error,
                            (HasQuote ? 1 : 0));
 
   // TODO: Translate any source ranges as well.
-  return SM.GetMessage(Loc, Error.getKind(), Error.getMessage(), None,
+  return SM.GetMessage(Loc, Error.getKind(), Error.getMessage(), std::nullopt,
                        Error.getFixIts());
 }
 

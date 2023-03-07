@@ -42,47 +42,6 @@ STATISTIC(NumIFuncs,    "Number of indirect functions removed");
 STATISTIC(NumVariables, "Number of global variables removed");
 STATISTIC(NumVFuncs,    "Number of virtual functions removed");
 
-namespace {
-  class GlobalDCELegacyPass : public ModulePass {
-  public:
-    static char ID; // Pass identification, replacement for typeid
-    GlobalDCELegacyPass() : ModulePass(ID) {
-      initializeGlobalDCELegacyPassPass(*PassRegistry::getPassRegistry());
-    }
-
-    // run - Do the GlobalDCE pass on the specified module, optionally updating
-    // the specified callgraph to reflect the changes.
-    //
-    bool runOnModule(Module &M) override {
-      if (skipModule(M))
-        return false;
-
-      // We need a minimally functional dummy module analysis manager. It needs
-      // to at least know about the possibility of proxying a function analysis
-      // manager.
-      FunctionAnalysisManager DummyFAM;
-      ModuleAnalysisManager DummyMAM;
-      DummyMAM.registerPass(
-          [&] { return FunctionAnalysisManagerModuleProxy(DummyFAM); });
-
-      auto PA = Impl.run(M, DummyMAM);
-      return !PA.areAllPreserved();
-    }
-
-  private:
-    GlobalDCEPass Impl;
-  };
-}
-
-char GlobalDCELegacyPass::ID = 0;
-INITIALIZE_PASS(GlobalDCELegacyPass, "globaldce",
-                "Dead Global Elimination", false, false)
-
-// Public interface to the GlobalDCEPass.
-ModulePass *llvm::createGlobalDCEPass() {
-  return new GlobalDCELegacyPass();
-}
-
 /// Returns true if F is effectively empty.
 static bool isEmptyFunction(Function *F) {
   // Skip external functions.
@@ -206,7 +165,7 @@ void GlobalDCEPass::ScanVTables(Module &M) {
 
 void GlobalDCEPass::ScanVTableLoad(Function *Caller, Metadata *TypeId,
                                    uint64_t CallOffset) {
-  for (auto &VTableInfo : TypeIdMap[TypeId]) {
+  for (const auto &VTableInfo : TypeIdMap[TypeId]) {
     GlobalVariable *VTable = VTableInfo.first;
     uint64_t VTableOffset = VTableInfo.second;
 
@@ -240,7 +199,7 @@ void GlobalDCEPass::ScanTypeCheckedLoadIntrinsics(Module &M) {
   if (!TypeCheckedLoadFunc)
     return;
 
-  for (auto U : TypeCheckedLoadFunc->users()) {
+  for (auto *U : TypeCheckedLoadFunc->users()) {
     auto CI = dyn_cast<CallInst>(U);
     if (!CI)
       continue;
@@ -254,7 +213,7 @@ void GlobalDCEPass::ScanTypeCheckedLoadIntrinsics(Module &M) {
     } else {
       // type.checked.load with a non-constant offset, so assume every entry in
       // every matching vtable is used.
-      for (auto &VTableInfo : TypeIdMap[TypeId]) {
+      for (const auto &VTableInfo : TypeIdMap[TypeId]) {
         VFESafeVTables.erase(VTableInfo.first);
       }
     }

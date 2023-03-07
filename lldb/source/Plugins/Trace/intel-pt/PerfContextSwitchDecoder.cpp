@@ -6,6 +6,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "PerfContextSwitchDecoder.h"
+#include <optional>
 
 using namespace lldb;
 using namespace lldb_private;
@@ -16,8 +17,13 @@ using namespace llvm;
 /// non-linux platforms.
 /// \{
 #define PERF_RECORD_MISC_SWITCH_OUT (1 << 13)
-#define PERF_RECORD_MAX 19
+
+#define PERF_RECORD_LOST 2
+#define PERF_RECORD_THROTTLE 5
+#define PERF_RECORD_UNTHROTTLE 6
+#define PERF_RECORD_LOST_SAMPLES 13
 #define PERF_RECORD_SWITCH_CPU_WIDE 15
+#define PERF_RECORD_MAX 19
 
 struct perf_event_header {
   uint32_t type;
@@ -53,6 +59,11 @@ struct perf_event_header {
 
   bool IsContextSwitchRecord() const {
     return type == PERF_RECORD_SWITCH_CPU_WIDE;
+  }
+
+  bool IsErrorRecord() const {
+    return type == PERF_RECORD_LOST || type == PERF_RECORD_THROTTLE ||
+           type == PERF_RECORD_UNTHROTTLE || type == PERF_RECORD_LOST_SAMPLES;
   }
 };
 /// \}
@@ -181,7 +192,7 @@ ThreadContinuousExecution ThreadContinuousExecution::CreateOnlyStartExecution(
 static Error RecoverExecutionsFromConsecutiveRecords(
     cpu_id_t cpu_id, const LinuxPerfZeroTscConversion &tsc_conversion,
     const ContextSwitchRecord &current_record,
-    const Optional<ContextSwitchRecord> &prev_record,
+    const std::optional<ContextSwitchRecord> &prev_record,
     std::function<void(const ThreadContinuousExecution &execution)>
         on_new_execution) {
   if (!prev_record) {
@@ -242,7 +253,7 @@ lldb_private::trace_intel_pt::DecodePerfContextSwitchTrace(
   size_t offset = 0;
 
   auto do_decode = [&]() -> Error {
-    Optional<ContextSwitchRecord> prev_record;
+    std::optional<ContextSwitchRecord> prev_record;
     while (offset < data.size()) {
       const perf_event_header &perf_record =
           *reinterpret_cast<const perf_event_header *>(data.data() + offset);
@@ -285,4 +296,37 @@ lldb_private::trace_intel_pt::DecodePerfContextSwitchTrace(
                                      cpu_id, offset, toString(std::move(err))));
 
   return executions;
+}
+
+Expected<std::vector<uint8_t>>
+lldb_private::trace_intel_pt::FilterProcessesFromContextSwitchTrace(
+    llvm::ArrayRef<uint8_t> data, const std::set<lldb::pid_t> &pids) {
+  size_t offset = 0;
+  std::vector<uint8_t> out_data;
+
+  while (offset < data.size()) {
+    const perf_event_header &perf_record =
+        *reinterpret_cast<const perf_event_header *>(data.data() + offset);
+    if (Error err = perf_record.SanityCheck())
+      return std::move(err);
+    bool should_copy = false;
+    if (perf_record.IsContextSwitchRecord()) {
+      const PerfContextSwitchRecord &context_switch_record =
+          *reinterpret_cast<const PerfContextSwitchRecord *>(data.data() +
+                                                             offset);
+      if (pids.count(context_switch_record.pid))
+        should_copy = true;
+    } else if (perf_record.IsErrorRecord()) {
+      should_copy = true;
+    }
+
+    if (should_copy) {
+      for (size_t i = 0; i < perf_record.size; i++) {
+        out_data.push_back(data[offset + i]);
+      }
+    }
+
+    offset += perf_record.size;
+  }
+  return out_data;
 }

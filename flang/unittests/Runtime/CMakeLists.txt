@@ -1,7 +1,10 @@
 add_flang_unittest(FlangRuntimeTests
+  Allocatable.cpp
+  ArrayConstructor.cpp
   BufferTest.cpp
   CharacterTest.cpp
   CommandTest.cpp
+  Complex.cpp
   CrashHandlerFixture.cpp
   ExternalIOTest.cpp
   Format.cpp

@@ -392,7 +392,8 @@ void CSKYInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
                                         MachineBasicBlock::iterator I,
                                         Register SrcReg, bool IsKill, int FI,
                                         const TargetRegisterClass *RC,
-                                        const TargetRegisterInfo *TRI) const {
+                                        const TargetRegisterInfo *TRI,
+                                        Register VReg) const {
   DebugLoc DL;
   if (I != MBB.end())
     DL = I->getDebugLoc();
@@ -435,7 +436,8 @@ void CSKYInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
                                          MachineBasicBlock::iterator I,
                                          Register DestReg, int FI,
                                          const TargetRegisterClass *RC,
-                                         const TargetRegisterInfo *TRI) const {
+                                         const TargetRegisterInfo *TRI,
+                                         Register VReg) const {
   DebugLoc DL;
   if (I != MBB.end())
     DL = I->getDebugLoc();
@@ -518,7 +520,7 @@ void CSKYInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
 
   unsigned Opcode = 0;
   if (CSKY::GPRRegClass.contains(DestReg, SrcReg))
-    Opcode = CSKY::MOV32;
+    Opcode = STI.hasE2() ? CSKY::MOV32 : CSKY::MOV16;
   else if (v2sf && CSKY::sFPR32RegClass.contains(DestReg, SrcReg))
     Opcode = CSKY::FMOV_S;
   else if (v3sf && CSKY::FPR32RegClass.contains(DestReg, SrcReg))

@@ -15,7 +15,7 @@
 
 #include "clang/Basic/MacroBuilder.h"
 #include "clang/Basic/TargetInfo.h"
-#include "llvm/Support/CSKYTargetParser.h"
+#include "llvm/TargetParser/CSKYTargetParser.h"
 
 namespace clang {
 namespace targets {
@@ -71,7 +71,7 @@ public:
 
   bool isValidCPUName(StringRef Name) const override;
 
-  virtual unsigned getMinGlobalAlign(uint64_t) const override;
+  unsigned getMinGlobalAlign(uint64_t) const override;
 
   ArrayRef<Builtin::Info> getTargetBuiltins() const override;
 

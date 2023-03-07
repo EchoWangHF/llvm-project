@@ -209,7 +209,7 @@ static MCSymbol *smallData(AsmPrinter &AP, const MachineInstr &MI,
       OutStreamer.emitLabel(Sym);
       OutStreamer.emitSymbolAttribute(Sym, MCSA_Global);
       OutStreamer.emitIntValue(Value, AlignSize);
-      OutStreamer.emitCodeAlignment(AlignSize, &STI);
+      OutStreamer.emitCodeAlignment(Align(AlignSize), &STI);
     }
   } else {
     assert(Imm.isExpr() && "Expected expression and found none");
@@ -237,7 +237,7 @@ static MCSymbol *smallData(AsmPrinter &AP, const MachineInstr &MI,
       OutStreamer.emitLabel(Sym);
       OutStreamer.emitSymbolAttribute(Sym, MCSA_Local);
       OutStreamer.emitValue(Imm.getExpr(), AlignSize);
-      OutStreamer.emitCodeAlignment(AlignSize, &STI);
+      OutStreamer.emitCodeAlignment(Align(AlignSize), &STI);
     }
   }
   return Sym;
@@ -743,6 +743,9 @@ void HexagonAsmPrinter::HexagonProcessInstruction(MCInst &Inst,
 
 /// Print out a single Hexagon MI to the current output stream.
 void HexagonAsmPrinter::emitInstruction(const MachineInstr *MI) {
+  Hexagon_MC::verifyInstructionPredicates(MI->getOpcode(),
+                                          getSubtargetInfo().getFeatureBits());
+
   MCInst MCB;
   MCB.setOpcode(Hexagon::BUNDLE);
   MCB.addOperand(MCOperand::createImm(0));
@@ -819,7 +822,7 @@ void HexagonAsmPrinter::EmitSled(const MachineInstr &MI, SledKind Kind) {
   emitNops(NoopsInSledCount);
 
   OutStreamer->emitLabel(PostSled);
-  recordSled(CurSled, MI, Kind, 0);
+  recordSled(CurSled, MI, Kind, 2);
 }
 
 void HexagonAsmPrinter::LowerPATCHABLE_FUNCTION_ENTER(const MachineInstr &MI) {

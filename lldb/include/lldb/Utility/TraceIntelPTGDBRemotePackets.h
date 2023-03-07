@@ -14,6 +14,7 @@
 #include "llvm/Support/JSON.h"
 
 #include <chrono>
+#include <optional>
 
 /// See docs/lldb-gdb-remote.txt for more information.
 ///
@@ -38,17 +39,21 @@ struct TraceIntelPTStartRequest : TraceStartRequest {
   bool enable_tsc;
 
   /// PSB packet period
-  llvm::Optional<uint64_t> psb_period;
+  std::optional<uint64_t> psb_period;
 
   /// Required when doing "process tracing".
   ///
   /// Limit in bytes on all the thread traces started by this "process trace"
   /// instance. When a thread is about to be traced and the limit would be hit,
   /// then a "tracing" stop event is triggered.
-  llvm::Optional<uint64_t> process_buffer_size_limit;
+  std::optional<uint64_t> process_buffer_size_limit;
 
   /// Whether to have a trace buffer per thread or per cpu cpu.
-  llvm::Optional<bool> per_cpu_tracing;
+  std::optional<bool> per_cpu_tracing;
+
+  /// Disable the cgroup filtering that is automatically applied in per cpu
+  /// mode.
+  std::optional<bool> disable_cgroup_filtering;
 
   bool IsPerCpuTracing() const;
 };
@@ -87,8 +92,8 @@ struct LinuxPerfZeroTscConversion {
   /// nanoseconds) is defined by the kernel at boot time and has no particularly
   /// useful meaning. On the other hand, this value is constant for an entire
   /// trace session.
-  //  See 'time_zero' section of
-  //  https://man7.org/linux/man-pages/man2/perf_event_open.2.html
+  /// See 'time_zero' section of
+  /// https://man7.org/linux/man-pages/man2/perf_event_open.2.html
   ///
   /// \param[in] tsc
   ///   The TSC value to be converted.
@@ -106,7 +111,8 @@ struct LinuxPerfZeroTscConversion {
 
 struct TraceIntelPTGetStateResponse : TraceGetStateResponse {
   /// The TSC to wall time conversion if it exists, otherwise \b nullptr.
-  llvm::Optional<LinuxPerfZeroTscConversion> tsc_perf_zero_conversion;
+  std::optional<LinuxPerfZeroTscConversion> tsc_perf_zero_conversion;
+  bool using_cgroup_filtering = false;
 };
 
 bool fromJSON(const llvm::json::Value &value,

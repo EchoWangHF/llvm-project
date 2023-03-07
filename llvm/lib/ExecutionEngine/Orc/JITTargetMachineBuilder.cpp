@@ -9,8 +9,8 @@
 #include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
 
 #include "llvm/MC/TargetRegistry.h"
-#include "llvm/Support/Host.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/TargetParser/Host.h"
 
 namespace llvm {
 namespace orc {
@@ -47,6 +47,10 @@ JITTargetMachineBuilder::createTargetMachine() {
   auto *TheTarget = TargetRegistry::lookupTarget(TT.getTriple(), ErrMsg);
   if (!TheTarget)
     return make_error<StringError>(std::move(ErrMsg), inconvertibleErrorCode());
+
+  if (!TheTarget->hasJIT())
+    return make_error<StringError>("Target has no JIT support",
+                                   inconvertibleErrorCode());
 
   auto *TM =
       TheTarget->createTargetMachine(TT.getTriple(), CPU, Features.getString(),

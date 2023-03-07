@@ -8,14 +8,14 @@
 
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/CommonFolders.h"
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/AffineMap.h"
-#include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/PatternMatch.h"
@@ -25,7 +25,6 @@
 #include "mlir/Transforms/InliningUtils.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/raw_ostream.h"
 #include <numeric>
@@ -50,8 +49,7 @@ struct ControlFlowInlinerInterface : public DialectInlinerInterface {
                        bool wouldBeCloned) const final {
     return true;
   }
-  bool isLegalToInline(Operation *, Region *, bool,
-                       BlockAndValueMapping &) const final {
+  bool isLegalToInline(Operation *, Region *, bool, IRMapping &) const final {
     return true;
   }
 
@@ -149,8 +147,9 @@ simplifyBrToBlockWithSinglePred(BranchOp op, PatternRewriter &rewriter) {
     return failure();
 
   // Merge the successor into the current block and erase the branch.
-  rewriter.mergeBlocks(succ, opParent, op.getOperands());
+  SmallVector<Value> brOperands(op.getOperands());
   rewriter.eraseOp(op);
+  rewriter.mergeBlocks(succ, opParent, brOperands);
   return success();
 }
 
@@ -444,7 +443,7 @@ SuccessorOperands CondBranchOp::getSuccessorOperands(unsigned index) {
 
 Block *CondBranchOp::getSuccessorForOperands(ArrayRef<Attribute> operands) {
   if (IntegerAttr condAttr = operands.front().dyn_cast_or_null<IntegerAttr>())
-    return condAttr.getValue().isOneValue() ? getTrueDest() : getFalseDest();
+    return condAttr.getValue().isOne() ? getTrueDest() : getFalseDest();
   return nullptr;
 }
 
@@ -596,7 +595,7 @@ SuccessorOperands SwitchOp::getSuccessorOperands(unsigned index) {
 }
 
 Block *SwitchOp::getSuccessorForOperands(ArrayRef<Attribute> operands) {
-  Optional<DenseIntElementsAttr> caseValues = getCaseValues();
+  std::optional<DenseIntElementsAttr> caseValues = getCaseValues();
 
   if (!caseValues)
     return getDefaultDestination();
@@ -745,7 +744,7 @@ static LogicalResult simplifyPassThroughSwitch(SwitchOp op,
     return failure();
 
   rewriter.replaceOpWithNewOp<SwitchOp>(op, op.getFlag(), defaultDest,
-                                        defaultOperands, caseValues.getValue(),
+                                        defaultOperands, *caseValues,
                                         newCaseDests, newCaseOperands);
   return success();
 }
@@ -806,7 +805,8 @@ simplifySwitchFromSwitchOnSameCondition(SwitchOp op,
   SuccessorRange predDests = predSwitch.getCaseDestinations();
   auto it = llvm::find(predDests, currentBlock);
   if (it != predDests.end()) {
-    Optional<DenseIntElementsAttr> predCaseValues = predSwitch.getCaseValues();
+    std::optional<DenseIntElementsAttr> predCaseValues =
+        predSwitch.getCaseValues();
     foldSwitch(op, rewriter,
                predCaseValues->getValues<APInt>()[it - predDests.begin()]);
   } else {

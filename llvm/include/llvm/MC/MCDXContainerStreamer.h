@@ -22,8 +22,6 @@
 #include "llvm/MC/MCObjectWriter.h"
 
 namespace llvm {
-class MCAssembler;
-class MCExpr;
 class MCInst;
 class raw_ostream;
 
@@ -36,9 +34,10 @@ public:
                          std::move(Emitter)) {}
 
   bool emitSymbolAttribute(MCSymbol *, MCSymbolAttr) override { return false; }
-  void emitCommonSymbol(MCSymbol *, uint64_t, unsigned) override {}
+  void emitCommonSymbol(MCSymbol *, uint64_t, Align) override {}
   void emitZerofill(MCSection *, MCSymbol *Symbol = nullptr, uint64_t Size = 0,
-                    unsigned ByteAlignment = 0, SMLoc Loc = SMLoc()) override {}
+                    Align ByteAlignment = Align(1),
+                    SMLoc Loc = SMLoc()) override {}
 
 private:
   void emitInstToData(const MCInst &, const MCSubtargetInfo &) override;

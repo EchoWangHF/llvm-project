@@ -83,8 +83,12 @@ def FalsePredicate : Predicate<"false">;
 
 // Add a predicate to the list if does not already exist to deduplicate it.
 class PredConcat<list<Predicate> lst, Predicate pred> {
-  list<Predicate> ret =
-      !listconcat([pred], !filter(item, lst, !ne(item, pred)));
+  list<Predicate> ret = !listconcat(lst, !listremove([pred], lst));
+}
+
+// Get the union of two Register lists
+class RegListUnion<list<Register> lstA, list<Register> lstB> {
+  list<Register> ret = !listconcat(lstA, !listremove(lstB, lstA));
 }
 
 class PredicateControl {
@@ -100,7 +104,10 @@ class PredicateControl {
 }
 
 class AMDGPUPat<dag pattern, dag result> : Pat<pattern, result>,
-      PredicateControl;
+      PredicateControl, GISelFlags;
+
+let GIIgnoreCopies = 1 in
+class AMDGPUPatIgnoreCopies<dag pattern, dag result> : AMDGPUPat<pattern, result>;
 
 let RecomputePerFunction = 1 in {
 def FP16Denormals : Predicate<"MF->getInfo<SIMachineFunctionInfo>()->getMode().allFP64FP16Denormals()">;
@@ -128,10 +135,6 @@ def s16ImmTarget : AsmOperandClass {
 
 let OperandType = "OPERAND_IMMEDIATE" in {
 
-def u32imm : Operand<i32> {
-  let PrintMethod = "printU32ImmOperand";
-}
-
 def u16imm : Operand<i16> {
   let PrintMethod = "printU16ImmOperand";
   let ParserMatchClass = u16ImmTarget;
@@ -140,10 +143,6 @@ def u16imm : Operand<i16> {
 def s16imm : Operand<i16> {
   let PrintMethod = "printU16ImmOperand";
   let ParserMatchClass = s16ImmTarget;
-}
-
-def u8imm : Operand<i8> {
-  let PrintMethod = "printU8ImmOperand";
 }
 
 } // End OperandType = "OPERAND_IMMEDIATE"
@@ -306,6 +305,13 @@ def hi_f16_elt : PatLeaf<
       return RHS->getZExtValue() == 16;
     return false;
 }]>;
+
+//===----------------------------------------------------------------------===//
+// PatLeafs for zero immediate
+//===----------------------------------------------------------------------===//
+
+def immzero : PatLeaf<(imm), [{ return N->isZero(); }]>;
+def fpimmzero : PatLeaf<(fpimm), [{ return N->isZero(); }]>;
 
 //===----------------------------------------------------------------------===//
 // PatLeafs for floating-point comparisons
@@ -531,63 +537,87 @@ def atomic_store_64_#as : PatFrag<(ops node:$ptr, node:$val),
 }
 } // End foreach as
 
-// TODO: Add GISelPredicateCode for the ret and noret PatFrags once
-// GlobalISelEmitter allows pattern matches where src and dst def count
-// mismatch.
-
-multiclass ret_noret_op {
-  let PredicateCode = [{ return !(SDValue(N, 0).use_empty()); }],
-      GISelPredicateCode = [{ return true; }] in {
-    def "_ret" : PatFrag<(ops node:$ptr, node:$data),
-      (!cast<SDPatternOperator>(NAME) node:$ptr, node:$data)>;
-  }
-
-  let PredicateCode = [{ return (SDValue(N, 0).use_empty()); }],
-      GISelPredicateCode = [{ return false; }] in {
-    def "_noret" : PatFrag<(ops node:$ptr, node:$data),
-      (!cast<SDPatternOperator>(NAME) node:$ptr, node:$data)>;
-  }
+multiclass noret_op {
+  let HasNoUse = true in
+  def "_noret" : PatFrag<(ops node:$ptr, node:$data),
+    (!cast<SDPatternOperator>(NAME) node:$ptr, node:$data)>;
 }
 
-defm int_amdgcn_flat_atomic_fadd : ret_noret_op;
-defm int_amdgcn_flat_atomic_fadd_v2bf16 : ret_noret_op;
-defm int_amdgcn_flat_atomic_fmin : ret_noret_op;
-defm int_amdgcn_flat_atomic_fmax : ret_noret_op;
-defm int_amdgcn_global_atomic_fadd : ret_noret_op;
-defm int_amdgcn_global_atomic_fadd_v2bf16 : ret_noret_op;
-defm int_amdgcn_global_atomic_fmin : ret_noret_op;
-defm int_amdgcn_global_atomic_fmax : ret_noret_op;
-defm int_amdgcn_ds_fadd_v2bf16 : ret_noret_op;
-
-multiclass ret_noret_binary_atomic_op<SDNode atomic_op, bit IsInt = 1> {
-  let PredicateCode = [{ return (SDValue(N, 0).use_empty()); }],
-      GISelPredicateCode = [{ return false; }] in {
-    defm "_noret" : binary_atomic_op<atomic_op, IsInt>;
-  }
-
-  let PredicateCode = [{ return !(SDValue(N, 0).use_empty()); }],
-      GISelPredicateCode = [{ return true; }] in {
-    defm "_ret" : binary_atomic_op<atomic_op, IsInt>;
-  }
+multiclass global_addr_space_atomic_op {
+  def "_noret_global_addrspace" :
+    PatFrag<(ops node:$ptr, node:$data),
+            (!cast<SDPatternOperator>(NAME) node:$ptr, node:$data)>{
+      let HasNoUse = true;
+      let AddressSpaces = LoadAddress_global.AddrSpaces;
+      let IsAtomic = 1;
+    }
+    def "_global_addrspace" :
+    PatFrag<(ops node:$ptr, node:$data),
+            (!cast<SDPatternOperator>(NAME) node:$ptr, node:$data)>{
+      let AddressSpaces = LoadAddress_global.AddrSpaces;
+      let IsAtomic = 1;
+    }
 }
 
-multiclass ret_noret_ternary_atomic_op<SDNode atomic_op> {
-  let PredicateCode = [{ return (SDValue(N, 0).use_empty()); }],
-      GISelPredicateCode = [{ return false; }] in {
-    defm "_noret" : ternary_atomic_op<atomic_op>;
-  }
+multiclass flat_addr_space_atomic_op {
+  def "_noret_flat_addrspace" :
+    PatFrag<(ops node:$ptr, node:$data),
+            (!cast<SDPatternOperator>(NAME) node:$ptr, node:$data)>{
+      let HasNoUse = true;
+      let AddressSpaces = LoadAddress_flat.AddrSpaces;
+      let IsAtomic = 1;
+    }
+    def "_flat_addrspace" :
+    PatFrag<(ops node:$ptr, node:$data),
+            (!cast<SDPatternOperator>(NAME) node:$ptr, node:$data)>{
+      let AddressSpaces = LoadAddress_flat.AddrSpaces;
+      let IsAtomic = 1;
+    }
+}
 
-  let PredicateCode = [{ return !(SDValue(N, 0).use_empty()); }],
-      GISelPredicateCode = [{ return true; }] in {
-    defm "_ret" : ternary_atomic_op<atomic_op>;
-  }
+multiclass local_addr_space_atomic_op {
+  def "_noret_local_addrspace" :
+    PatFrag<(ops node:$ptr, node:$data),
+            (!cast<SDPatternOperator>(NAME) node:$ptr, node:$data)>{
+      let HasNoUse = true;
+      let AddressSpaces = LoadAddress_local.AddrSpaces;
+      let IsAtomic = 1;
+    }
+    def "_local_addrspace" :
+    PatFrag<(ops node:$ptr, node:$data),
+            (!cast<SDPatternOperator>(NAME) node:$ptr, node:$data)>{
+      let AddressSpaces = LoadAddress_local.AddrSpaces;
+      let IsAtomic = 1;
+    }
+}
+
+defm int_amdgcn_flat_atomic_fadd : flat_addr_space_atomic_op;
+defm int_amdgcn_flat_atomic_fadd_v2bf16 : noret_op;
+defm int_amdgcn_flat_atomic_fmin : noret_op;
+defm int_amdgcn_flat_atomic_fmax : noret_op;
+defm int_amdgcn_global_atomic_fadd : global_addr_space_atomic_op;
+defm int_amdgcn_flat_atomic_fadd : global_addr_space_atomic_op;
+defm int_amdgcn_global_atomic_fadd_v2bf16 : noret_op;
+defm int_amdgcn_global_atomic_fmin : noret_op;
+defm int_amdgcn_global_atomic_fmax : noret_op;
+defm int_amdgcn_flat_atomic_fadd : local_addr_space_atomic_op;
+defm int_amdgcn_ds_fadd_v2bf16 : noret_op;
+
+multiclass noret_binary_atomic_op<SDNode atomic_op, bit IsInt = 1> {
+  let HasNoUse = true in
+  defm "_noret" : binary_atomic_op<atomic_op, IsInt>;
+}
+
+multiclass noret_ternary_atomic_op<SDNode atomic_op> {
+  let HasNoUse = true in
+  defm "_noret" : ternary_atomic_op<atomic_op>;
 }
 
 multiclass binary_atomic_op_all_as<SDNode atomic_op, bit IsInt = 1> {
   foreach as = [ "global", "flat", "constant", "local", "private", "region" ] in {
     let AddressSpaces = !cast<AddressSpaceList>("LoadAddress_"#as).AddrSpaces in {
       defm "_"#as : binary_atomic_op<atomic_op, IsInt>;
-      defm "_"#as : ret_noret_binary_atomic_op<atomic_op, IsInt>;
+      defm "_"#as : noret_binary_atomic_op<atomic_op, IsInt>;
     }
   }
 }
@@ -603,6 +633,8 @@ defm atomic_load_umax : binary_atomic_op_all_as<atomic_load_umax>;
 defm atomic_load_umin : binary_atomic_op_all_as<atomic_load_umin>;
 defm atomic_load_xor : binary_atomic_op_all_as<atomic_load_xor>;
 defm atomic_load_fadd : binary_atomic_op_all_as<atomic_load_fadd, 0>;
+defm atomic_load_uinc_wrap : binary_atomic_op_all_as<atomic_load_uinc_wrap>;
+defm atomic_load_udec_wrap : binary_atomic_op_all_as<atomic_load_udec_wrap>;
 let MemoryVT = v2f16 in
 defm atomic_load_fadd_v2f16 : binary_atomic_op_all_as<atomic_load_fadd, 0>;
 defm AMDGPUatomic_cmp_swap : binary_atomic_op_all_as<AMDGPUatomic_cmp_swap>;
@@ -629,13 +661,15 @@ def store_align16_local: PatFrag<(ops node:$val, node:$ptr),
 
 let AddressSpaces = StoreAddress_local.AddrSpaces in {
 defm atomic_cmp_swap_local : ternary_atomic_op<atomic_cmp_swap>;
-defm atomic_cmp_swap_local : ret_noret_ternary_atomic_op<atomic_cmp_swap>;
-defm atomic_cmp_swap_local_m0 : ret_noret_ternary_atomic_op<atomic_cmp_swap_glue>;
+defm atomic_cmp_swap_local : noret_ternary_atomic_op<atomic_cmp_swap>;
+defm atomic_cmp_swap_local_m0 : noret_ternary_atomic_op<atomic_cmp_swap_glue>;
+defm atomic_cmp_swap_local_m0 : ternary_atomic_op<atomic_cmp_swap_glue>;
 }
 
 let AddressSpaces = StoreAddress_region.AddrSpaces in {
-defm atomic_cmp_swap_region : ret_noret_ternary_atomic_op<atomic_cmp_swap>;
-defm atomic_cmp_swap_region_m0 : ret_noret_ternary_atomic_op<atomic_cmp_swap_glue>;
+defm atomic_cmp_swap_region : noret_ternary_atomic_op<atomic_cmp_swap>;
+defm atomic_cmp_swap_region_m0 : noret_ternary_atomic_op<atomic_cmp_swap_glue>;
+defm atomic_cmp_swap_region_m0 : ternary_atomic_op<atomic_cmp_swap_glue>;
 }
 
 //===----------------------------------------------------------------------===//
@@ -761,6 +795,25 @@ def fminnum_like : PatFrags<(ops node:$src0, node:$src1),
 
 // Instructions which select to the same v_max_f*
 def fmaxnum_like : PatFrags<(ops node:$src0, node:$src1),
+  [(fmaxnum_ieee node:$src0, node:$src1),
+   (fmaxnum node:$src0, node:$src1)]
+>;
+
+class NeverNaNPats<dag ops, list<dag> frags> : PatFrags<ops, frags> {
+  let PredicateCode = [{
+    return CurDAG->isKnownNeverNaN(SDValue(N,0));
+  }];
+  let GISelPredicateCode = [{
+    return isKnownNeverNaN(MI.getOperand(0).getReg(), MRI);
+  }];
+}
+
+def fminnum_like_nnan : NeverNaNPats<(ops node:$src0, node:$src1),
+  [(fminnum_ieee node:$src0, node:$src1),
+   (fminnum node:$src0, node:$src1)]
+>;
+
+def fmaxnum_like_nnan : NeverNaNPats<(ops node:$src0, node:$src1),
   [(fmaxnum_ieee node:$src0, node:$src1),
    (fmaxnum node:$src0, node:$src1)]
 >;

@@ -55,8 +55,7 @@ using namespace llvm;
 
 LLVM_INSTANTIATE_REGISTRY(clang::tidy::ClangTidyModuleRegistry)
 
-namespace clang {
-namespace tidy {
+namespace clang::tidy {
 
 namespace {
 #if CLANG_TIDY_ENABLE_STATIC_ANALYZER
@@ -104,7 +103,7 @@ public:
               DiagPrinter),
         SourceMgr(Diags, Files), Context(Context), ApplyFixes(ApplyFixes),
         TotalFixes(0), AppliedFixes(0), WarningsAsErrors(0) {
-    DiagOpts->ShowColors = Context.getOptions().UseColor.getValueOr(
+    DiagOpts->ShowColors = Context.getOptions().UseColor.value_or(
         llvm::sys::Process::StandardOutHasColors());
     DiagPrinter->BeginSourceFile(LangOpts);
     if (DiagOpts->ShowColors && !llvm::sys::Process::StandardOutIsDisplayed()) {
@@ -623,5 +622,39 @@ void exportReplacements(const llvm::StringRef MainFilePath,
   YAML << TUD;
 }
 
-} // namespace tidy
-} // namespace clang
+NamesAndOptions
+getAllChecksAndOptions(bool AllowEnablingAnalyzerAlphaCheckers) {
+  NamesAndOptions Result;
+  ClangTidyOptions Opts;
+  Opts.Checks = "*";
+  clang::tidy::ClangTidyContext Context(
+      std::make_unique<DefaultOptionsProvider>(ClangTidyGlobalOptions(), Opts),
+      AllowEnablingAnalyzerAlphaCheckers);
+  ClangTidyCheckFactories Factories;
+  for (const ClangTidyModuleRegistry::entry &Module :
+       ClangTidyModuleRegistry::entries()) {
+    Module.instantiate()->addCheckFactories(Factories);
+  }
+
+  for (const auto &Factory : Factories)
+    Result.Names.insert(Factory.getKey());
+
+#if CLANG_TIDY_ENABLE_STATIC_ANALYZER
+  SmallString<64> Buffer(AnalyzerCheckNamePrefix);
+  size_t DefSize = Buffer.size();
+  for (const auto &AnalyzerCheck : AnalyzerOptions::getRegisteredCheckers(
+           AllowEnablingAnalyzerAlphaCheckers)) {
+    Buffer.truncate(DefSize);
+    Buffer.append(AnalyzerCheck);
+    Result.Names.insert(Buffer);
+  }
+#endif // CLANG_TIDY_ENABLE_STATIC_ANALYZER
+
+  Context.setOptionsCollector(&Result.Options);
+  for (const auto &Factory : Factories) {
+    Factory.getValue()(Factory.getKey(), &Context);
+  }
+
+  return Result;
+}
+} // namespace clang::tidy

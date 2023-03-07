@@ -1,4 +1,4 @@
-; RUN: opt -always-inline -S %s | FileCheck %s
+; RUN: opt -passes=always-inline -S %s | FileCheck %s
 %0 = type { i64, i64, ptr addrspace(1), ptr addrspace(1) }
 %__aaa_struct = type { { ptr, i32, i32, ptr, ptr addrspace(1) }, %0, [17 x i8], { ptr, i32, i32, ptr, ptr addrspace(1) }, %0, [18 x i8] }
 %struct.__block_descriptor = type { i64, i64 }
@@ -19,10 +19,8 @@ entry:
 define i32 @f0(ptr addrspace(1), ptr addrspace(4)) #1 {
 entry:
   %2 = getelementptr inbounds %struct.__block_literal_generic, ptr addrspace(4) %1, i64 0, i32 3
-  %3 = bitcast ptr addrspace(4) %1 to ptr addrspace(4)
-  %4 = bitcast ptr addrspace(4) %2 to ptr addrspace(4)
-  %5 = load ptr, ptr addrspace(4) %4, align 8
-  %call = tail call i32 %5(ptr addrspace(4) %3, ptr addrspace(1) %0) #2
+  %3 = load ptr, ptr addrspace(4) %2, align 8
+  %call = tail call i32 %3(ptr addrspace(4) %1, ptr addrspace(1) %0) #2
   ret i32 %call
 }
 

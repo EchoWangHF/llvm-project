@@ -57,8 +57,9 @@ void *map(void *Addr, uptr Size, const char *Name, uptr Flags,
   if (Flags & MAP_NOACCESS)
     return allocateVmar(Size, Data, AllowNoMem);
 
-  const zx_handle_t Vmar = Data ? Data->Vmar : _zx_vmar_root_self();
-  CHECK_NE(Vmar, ZX_HANDLE_INVALID);
+  const zx_handle_t Vmar = (Data && Data->Vmar != ZX_HANDLE_INVALID)
+                               ? Data->Vmar
+                               : _zx_vmar_root_self();
 
   zx_status_t Status;
   zx_handle_t Vmo;
@@ -96,6 +97,17 @@ void *map(void *Addr, uptr Size, const char *Name, uptr Flags,
   if (Offset)
     MapFlags |= ZX_VM_SPECIFIC;
   Status = _zx_vmar_map(Vmar, MapFlags, Offset, Vmo, VmoSize, Size, &P);
+  if (UNLIKELY(Status != ZX_OK)) {
+    if (Status != ZX_ERR_NO_MEMORY || !AllowNoMem)
+      dieOnMapUnmapError(Status == ZX_ERR_NO_MEMORY ? Size : 0);
+    return nullptr;
+  }
+
+  if (Flags & MAP_PRECOMMIT) {
+    Status = _zx_vmar_op_range(Vmar, ZX_VMAR_OP_COMMIT, P, Size,
+                               /*buffer=*/nullptr, /*buffer_size=*/0);
+  }
+
   // No need to track the Vmo if we don't intend on resizing it. Close it.
   if (Flags & MAP_RESIZABLE) {
     DCHECK(Data);
@@ -111,6 +123,7 @@ void *map(void *Addr, uptr Size, const char *Name, uptr Flags,
       dieOnMapUnmapError(Status == ZX_ERR_NO_MEMORY ? Size : 0);
     return nullptr;
   }
+
   if (Data)
     Data->VmoSize += Size;
 
@@ -126,7 +139,9 @@ void unmap(void *Addr, uptr Size, uptr Flags, MapPlatformData *Data) {
     CHECK_EQ(_zx_vmar_destroy(Vmar), ZX_OK);
     CHECK_EQ(_zx_handle_close(Vmar), ZX_OK);
   } else {
-    const zx_handle_t Vmar = Data ? Data->Vmar : _zx_vmar_root_self();
+    const zx_handle_t Vmar = (Data && Data->Vmar != ZX_HANDLE_INVALID)
+                                 ? Data->Vmar
+                                 : _zx_vmar_root_self();
     const zx_status_t Status =
         _zx_vmar_unmap(Vmar, reinterpret_cast<uintptr_t>(Addr), Size);
     if (UNLIKELY(Status != ZX_OK))
@@ -151,6 +166,8 @@ void setMemoryPermission(UNUSED uptr Addr, UNUSED uptr Size, UNUSED uptr Flags,
 
 void releasePagesToOS(UNUSED uptr BaseAddress, uptr Offset, uptr Size,
                       MapPlatformData *Data) {
+  // TODO: DCHECK the BaseAddress is consistent with the data in
+  // MapPlatformData.
   DCHECK(Data);
   DCHECK_NE(Data->Vmar, ZX_HANDLE_INVALID);
   DCHECK_NE(Data->Vmo, ZX_HANDLE_INVALID);
@@ -179,6 +196,8 @@ void HybridMutex::lockSlow() __TA_NO_THREAD_SAFETY_ANALYSIS {
 void HybridMutex::unlock() __TA_NO_THREAD_SAFETY_ANALYSIS {
   sync_mutex_unlock(&M);
 }
+
+void HybridMutex::assertHeldImpl() __TA_NO_THREAD_SAFETY_ANALYSIS {}
 
 u64 getMonotonicTime() { return _zx_clock_get_monotonic(); }
 

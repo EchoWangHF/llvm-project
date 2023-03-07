@@ -11,14 +11,12 @@
 
 #include "IntelPTProcessTrace.h"
 #include "IntelPTSingleBufferTrace.h"
-
 #include "lldb/Host/common/NativeProcessProtocol.h"
 #include "lldb/Utility/TraceIntelPTGDBRemotePackets.h"
 #include "lldb/lldb-types.h"
-
 #include "llvm/Support/Error.h"
-
 #include <memory>
+#include <optional>
 
 namespace lldb_private {
 namespace process_linux {
@@ -35,12 +33,18 @@ public:
   /// \param[in] process
   ///   The process being debugged.
   ///
+  ///  \param[in] cgroup_fd
+  ///  A file descriptor in /sys/fs associated with the cgroup of the process to
+  ///  trace. If not \a std::nullopt, then the trace sesion will use cgroup
+  ///  filtering.
+  ///
   /// \return
   ///   An \a IntelPTMultiCoreTrace instance if tracing was successful, or
   ///   an \a llvm::Error otherwise.
   static llvm::Expected<std::unique_ptr<IntelPTMultiCoreTrace>>
   StartOnAllCores(const TraceIntelPTStartRequest &request,
-                  NativeProcessProtocol &process);
+                  NativeProcessProtocol &process,
+                  std::optional<int> cgroup_fd = std::nullopt);
 
   /// Execute the provided callback on each core that is being traced.
   ///
@@ -80,7 +84,7 @@ public:
 
   llvm::Error TraceStop(lldb::tid_t tid) override;
 
-  llvm::Expected<llvm::Optional<std::vector<uint8_t>>>
+  llvm::Expected<std::optional<std::vector<uint8_t>>>
   TryGetBinaryData(const TraceGetBinaryDataRequest &request) override;
 
 private:
@@ -90,8 +94,9 @@ private:
       llvm::DenseMap<lldb::cpu_id_t,
                      std::pair<IntelPTSingleBufferTrace, ContextSwitchTrace>>
           &&traces_per_core,
-      NativeProcessProtocol &process)
-      : m_traces_per_core(std::move(traces_per_core)), m_process(process) {}
+      NativeProcessProtocol &process, bool using_cgroup_filtering)
+      : m_traces_per_core(std::move(traces_per_core)), m_process(process),
+        m_using_cgroup_filtering(using_cgroup_filtering) {}
 
   llvm::DenseMap<lldb::cpu_id_t,
                  std::pair<IntelPTSingleBufferTrace, ContextSwitchTrace>>
@@ -99,6 +104,7 @@ private:
 
   /// The target process.
   NativeProcessProtocol &m_process;
+  bool m_using_cgroup_filtering;
 };
 
 } // namespace process_linux

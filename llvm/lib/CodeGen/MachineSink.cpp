@@ -275,8 +275,8 @@ bool MachineSinking::PerformTrivialForwardCoalescing(MachineInstr &MI,
 
   Register SrcReg = MI.getOperand(1).getReg();
   Register DstReg = MI.getOperand(0).getReg();
-  if (!Register::isVirtualRegister(SrcReg) ||
-      !Register::isVirtualRegister(DstReg) || !MRI->hasOneNonDBGUse(SrcReg))
+  if (!SrcReg.isVirtual() || !DstReg.isVirtual() ||
+      !MRI->hasOneNonDBGUse(SrcReg))
     return false;
 
   const TargetRegisterClass *SRC = MRI->getRegClass(SrcReg);
@@ -309,7 +309,7 @@ bool MachineSinking::AllUsesDominatedByBlock(Register Reg,
                                              MachineBasicBlock *DefMBB,
                                              bool &BreakPHIEdge,
                                              bool &LocalUse) const {
-  assert(Register::isVirtualRegister(Reg) && "Only makes sense for vregs");
+  assert(Reg.isVirtual() && "Only makes sense for vregs");
 
   // Ignore debug uses because debug info doesn't affect the code.
   if (MRI->use_nodbg_empty(Reg))
@@ -331,7 +331,7 @@ bool MachineSinking::AllUsesDominatedByBlock(Register Reg,
   //     %p = PHI %y, %bb.0, %def, %bb.1
   if (all_of(MRI->use_nodbg_operands(Reg), [&](MachineOperand &MO) {
         MachineInstr *UseInst = MO.getParent();
-        unsigned OpNo = UseInst->getOperandNo(&MO);
+        unsigned OpNo = MO.getOperandNo();
         MachineBasicBlock *UseBlock = UseInst->getParent();
         return UseBlock == MBB && UseInst->isPHI() &&
                UseInst->getOperand(OpNo + 1).getMBB() == DefMBB;
@@ -446,7 +446,7 @@ bool MachineSinking::runOnMachineFunction(MachineFunction &MF) {
       MadeChange |= ProcessBlock(MBB);
 
     // If we have anything we marked as toSplit, split it now.
-    for (auto &Pair : ToSplit) {
+    for (const auto &Pair : ToSplit) {
       auto NewSucc = Pair.first->SplitCriticalEdge(Pair.second, *this);
       if (NewSucc != nullptr) {
         LLVM_DEBUG(dbgs() << " *** Splitting critical edge: "
@@ -611,7 +611,7 @@ bool MachineSinking::isWorthBreakingCriticalEdge(MachineInstr &MI,
 
     // We don't move live definitions of physical registers,
     // so sinking their uses won't enable any opportunities.
-    if (Register::isPhysicalRegister(Reg))
+    if (Reg.isPhysical())
       continue;
 
     // If this instruction is the only user of a virtual register,
@@ -805,7 +805,7 @@ bool MachineSinking::isProfitableToSinkTo(Register Reg, MachineInstr &MI,
     if (Reg == 0)
       continue;
 
-    if (Register::isPhysicalRegister(Reg)) {
+    if (Reg.isPhysical()) {
       if (MO.isUse() &&
           (MRI->isConstantPhysReg(Reg) || TII->isIgnorableUse(MO)))
         continue;
@@ -910,7 +910,7 @@ MachineSinking::FindSuccToSinkTo(MachineInstr &MI, MachineBasicBlock *MBB,
     Register Reg = MO.getReg();
     if (Reg == 0) continue;
 
-    if (Register::isPhysicalRegister(Reg)) {
+    if (Reg.isPhysical()) {
       if (MO.isUse()) {
         // If the physreg has no defs anywhere, it's just an ambient register
         // and we can freely move its uses. Alternatively, if it's allocatable,
@@ -1177,7 +1177,7 @@ bool MachineSinking::hasStoreBetween(MachineBasicBlock *From,
 
       // If this BB is too big or the block number in straight line between From
       // and To is too big, stop searching to save compiling time.
-      if (BB->size() > SinkLoadInstsPerBlockThreshold ||
+      if (BB->sizeWithoutDebugLargerThan(SinkLoadInstsPerBlockThreshold) ||
           HandledDomBlocks.size() > SinkLoadBlocksThreshold) {
         for (auto *DomBB : HandledDomBlocks) {
           if (DomBB != BB && DT->dominates(DomBB, BB))
@@ -1279,7 +1279,7 @@ bool MachineSinking::SinkIntoCycle(MachineCycle *Cycle, MachineInstr &I) {
         dbgs() << "CycleSink: Not sinking, sink block is the preheader\n");
     return false;
   }
-  if (SinkBlock->size() > SinkLoadInstsPerBlockThreshold) {
+  if (SinkBlock->sizeWithoutDebugLargerThan(SinkLoadInstsPerBlockThreshold)) {
     LLVM_DEBUG(
         dbgs() << "CycleSink: Not Sinking, block too large to analyse.\n");
     return false;
@@ -1288,6 +1288,12 @@ bool MachineSinking::SinkIntoCycle(MachineCycle *Cycle, MachineInstr &I) {
   LLVM_DEBUG(dbgs() << "CycleSink: Sinking instruction!\n");
   SinkBlock->splice(SinkBlock->SkipPHIsAndLabels(SinkBlock->begin()), Preheader,
                     I);
+
+  // Conservatively clear any kill flags on uses of sunk instruction
+  for (MachineOperand &MO : I.operands()) {
+    if (MO.isReg() && MO.readsReg())
+      RegsToClearKillFlags.insert(MO.getReg());
+  }
 
   // The instruction is moved from its basic block, so do not retain the
   // debug information.
@@ -1317,7 +1323,7 @@ static bool blockPrologueInterferes(MachineBasicBlock *BB,
       if (!Reg)
         continue;
       if (MO.isUse()) {
-        if (Register::isPhysicalRegister(Reg) &&
+        if (Reg.isPhysical() &&
             (TII->isIgnorableUse(MO) || (MRI && MRI->isConstantPhysReg(Reg))))
           continue;
         if (PI->modifiesRegister(Reg, TRI))
@@ -1381,7 +1387,7 @@ bool MachineSinking::SinkInstruction(MachineInstr &MI, bool &SawStore,
     if (!MO.isReg() || MO.isUse())
       continue;
     Register Reg = MO.getReg();
-    if (Reg == 0 || !Register::isPhysicalRegister(Reg))
+    if (Reg == 0 || !Reg.isPhysical())
       continue;
     if (SuccToSinkTo->isLiveIn(Reg))
       return false;
@@ -1773,11 +1779,11 @@ bool PostRAMachineSinking::tryToSinkCopy(MachineBasicBlock &CurBB,
 
     // We must sink this DBG_VALUE if its operand is sunk. To avoid searching
     // for DBG_VALUEs later, record them when they're encountered.
-    if (MI.isDebugValue()) {
+    if (MI.isDebugValue() && !MI.isDebugRef()) {
       SmallDenseMap<MCRegister, SmallVector<unsigned, 2>, 4> MIUnits;
       bool IsValid = true;
       for (MachineOperand &MO : MI.debug_operands()) {
-        if (MO.isReg() && Register::isPhysicalRegister(MO.getReg())) {
+        if (MO.isReg() && MO.getReg().isPhysical()) {
           // Bail if we can already tell the sink would be rejected, rather
           // than needlessly accumulating lots of DBG_VALUEs.
           if (hasRegisterDependency(&MI, UsedOpsInCopy, DefedRegsInCopy,

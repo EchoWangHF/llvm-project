@@ -4,7 +4,6 @@ Test lldb-vscode completions request
 
 
 import lldbvscode_testcase
-import unittest2
 import vscode
 from lldbsuite.test import lldbutil
 from lldbsuite.test.decorators import *
@@ -42,7 +41,7 @@ class TestVSCode_variables(lldbvscode_testcase.VSCodeTestCaseBase):
             [
                 {
                     "text": "var",
-                    "label": "var -- vector<basic_string<char, char_traits<char>, allocator<char>>, allocator<basic_string<char, char_traits<char>, allocator<char>>>> &",
+                    "label": "var -- vector<basic_string<char>> &",
                 }
             ],
             [{"text": "var1", "label": "var1 -- int &"}],
@@ -67,7 +66,7 @@ class TestVSCode_variables(lldbvscode_testcase.VSCodeTestCaseBase):
             [
                 {
                     "text": "var",
-                    "label": "var -- vector<basic_string<char, char_traits<char>, allocator<char> >, allocator<basic_string<char, char_traits<char>, allocator<char> > > > &",
+                    "label": "var -- vector<basic_string<char>> &",
                 }
             ],
         )

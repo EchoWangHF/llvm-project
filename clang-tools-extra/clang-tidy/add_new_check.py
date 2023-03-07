@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 #===- add_new_check.py - clang-tidy check generator ---------*- python -*--===#
 #
@@ -77,9 +77,7 @@ def write_header(module_path, module, namespace, check_name, check_name_camel):
 
 #include "../ClangTidyCheck.h"
 
-namespace clang {
-namespace tidy {
-namespace %(namespace)s {
+namespace clang::tidy::%(namespace)s {
 
 /// FIXME: Write a short description.
 ///
@@ -93,9 +91,7 @@ public:
   void check(const ast_matchers::MatchFinder::MatchResult &Result) override;
 };
 
-} // namespace %(namespace)s
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy::%(namespace)s
 
 #endif // %(header_guard)s
 """ % {'header_guard': header_guard,
@@ -129,9 +125,7 @@ def write_implementation(module_path, module, namespace, check_name_camel):
 
 using namespace clang::ast_matchers;
 
-namespace clang {
-namespace tidy {
-namespace %(namespace)s {
+namespace clang::tidy::%(namespace)s {
 
 void %(check_name)s::registerMatchers(MatchFinder *Finder) {
   // FIXME: Add matchers.
@@ -149,9 +143,7 @@ void %(check_name)s::check(const MatchFinder::MatchResult &Result) {
       << FixItHint::CreateInsertion(MatchedDecl->getLocation(), "awesome_");
 }
 
-} // namespace %(namespace)s
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy::%(namespace)s
 """ % {'check_name': check_name_camel,
        'module': module,
        'namespace': namespace})
@@ -278,8 +270,9 @@ def add_release_notes(module_path, module, check_name):
 # Adds a test for the check.
 def write_test(module_path, module, check_name, test_extension):
   check_name_dashes = module + '-' + check_name
-  filename = os.path.normpath(os.path.join(module_path, '../../test/clang-tidy/checkers',
-                                           check_name_dashes + '.' + test_extension))
+  filename = os.path.normpath(os.path.join(
+    module_path, '..', '..', 'test', 'clang-tidy', 'checkers',
+    module, check_name + '.' + test_extension))
   print('Creating %s...' % filename)
   with io.open(filename, 'w', encoding='utf8', newline='\n') as f:
     f.write("""// RUN: %%check_clang_tidy %%s %(check_name_dashes)s %%t
@@ -321,8 +314,7 @@ def update_checks_list(clang_tidy_path):
     lines = f.readlines()
   # Get all existing docs
   doc_files = []
-  for subdir in list(filter(lambda s: not s.endswith('.rst') and not s.endswith('.py'),
-                     os.listdir(docs_dir))):
+  for subdir in filter(lambda s: os.path.isdir(os.path.join(docs_dir, s)), os.listdir(docs_dir)):
     for file in filter(lambda s: s.endswith('.rst'), os.listdir(os.path.join(docs_dir, subdir))):
       doc_files.append([subdir, file])
   doc_files.sort()

@@ -8,6 +8,7 @@
 
 #include "lldb/Symbol/SymbolContext.h"
 
+#include "lldb/Core/Debugger.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Host/Host.h"
@@ -494,20 +495,16 @@ bool SymbolContext::GetParentOfInlinedScope(const Address &curr_frame_pc,
               objfile = symbol_file->GetObjectFile();
           }
           if (objfile) {
-            Host::SystemLog(
-                Host::eSystemLogWarning,
-                "warning: inlined block 0x%8.8" PRIx64
-                " doesn't have a range that contains file address 0x%" PRIx64
-                " in %s\n",
+            Debugger::ReportWarning(llvm::formatv(
+                "inlined block {0:x} doesn't have a range that contains file "
+                "address {1:x} in {2}",
                 curr_inlined_block->GetID(), curr_frame_pc.GetFileAddress(),
-                objfile->GetFileSpec().GetPath().c_str());
+                objfile->GetFileSpec().GetPath()));
           } else {
-            Host::SystemLog(
-                Host::eSystemLogWarning,
-                "warning: inlined block 0x%8.8" PRIx64
-                " doesn't have a range that contains file address 0x%" PRIx64
-                "\n",
-                curr_inlined_block->GetID(), curr_frame_pc.GetFileAddress());
+            Debugger::ReportWarning(llvm::formatv(
+                "inlined block {0:x} doesn't have a range that contains file "
+                "address {1:x}",
+                curr_inlined_block->GetID(), curr_frame_pc.GetFileAddress()));
           }
         }
 #endif
@@ -542,17 +539,12 @@ Block *SymbolContext::GetFunctionBlock() {
   return nullptr;
 }
 
-bool SymbolContext::GetFunctionMethodInfo(lldb::LanguageType &language,
-                                          bool &is_instance_method,
-                                          ConstString &language_object_name)
-
-{
+bool SymbolContext::GetFunctionMethodInfo(ConstString &language_object_name) {
   Block *function_block = GetFunctionBlock();
   if (function_block) {
     CompilerDeclContext decl_ctx = function_block->GetDeclContext();
     if (decl_ctx)
-      return decl_ctx.IsClassMethod(&language, &is_instance_method,
-                                    &language_object_name);
+      return decl_ctx.IsClassMethod(&language_object_name);
   }
   return false;
 }
@@ -815,9 +807,7 @@ const Symbol *SymbolContext::FindBestGlobalDataSymbol(ConstString name,
                 reexport_module_sp =
                     target.GetImages().FindFirstModule(reexport_module_spec);
                 if (!reexport_module_sp) {
-                  reexport_module_spec.GetPlatformFileSpec()
-                      .GetDirectory()
-                      .Clear();
+                  reexport_module_spec.GetPlatformFileSpec().ClearDirectory();
                   reexport_module_sp =
                       target.GetImages().FindFirstModule(reexport_module_spec);
                 }

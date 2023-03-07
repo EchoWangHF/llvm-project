@@ -19,14 +19,13 @@
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
-#if _LIBCPP_STD_VER > 11
+#if _LIBCPP_STD_VER >= 14
 
 template <class _Tp, class, class = void>
 struct __is_transparent : false_type {};
 
 template <class _Tp, class _Up>
-struct __is_transparent<_Tp, _Up,
-                        typename __void_t<typename _Tp::is_transparent>::type>
+struct __is_transparent<_Tp, _Up, __void_t<typename _Tp::is_transparent> >
    : true_type {};
 
 #endif

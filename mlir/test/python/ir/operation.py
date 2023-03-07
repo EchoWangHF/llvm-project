@@ -4,6 +4,7 @@ import gc
 import io
 import itertools
 from mlir.ir import *
+from mlir.dialects.builtin import ModuleOp
 
 
 def run(f):
@@ -184,6 +185,19 @@ def testBlockArgumentList():
     # CHECK: Type: i24
     for t in entry_block.arguments.types:
       print("Type: ", t)
+
+    # Check that slicing and type access compose.
+    # CHECK: Sliced type: i16
+    # CHECK: Sliced type: i24
+    for t in entry_block.arguments[1:].types:
+      print("Sliced type: ", t)
+
+    # Check that slice addition works as expected.
+    # CHECK: Argument 2, type i24
+    # CHECK: Argument 0, type i8
+    restructured = entry_block.arguments[-1:] + entry_block.arguments[:1]
+    for arg in restructured:
+      print(f"Argument {arg.arg_number}, type {arg.type}")
 
 
 # CHECK-LABEL: TEST: testOperationOperands
@@ -553,6 +567,18 @@ def testOperationPrint():
   print(str_value.__class__)
   print(f.getvalue())
 
+  # Test roundtrip to bytecode.
+  bytecode_stream = io.BytesIO()
+  module.operation.write_bytecode(bytecode_stream)
+  bytecode = bytecode_stream.getvalue()
+  assert bytecode.startswith(b'ML\xefR'), "Expected bytecode to start with MLïR"
+  module_roundtrip = Module.parse(bytecode, ctx)
+  f = io.StringIO()
+  module_roundtrip.operation.print(file=f)
+  roundtrip_value = f.getvalue()
+  assert str_value == roundtrip_value, "Mismatch after roundtrip bytecode"
+
+
   # Test print to binary file.
   f = io.BytesIO()
   # CHECK: <class 'bytes'>
@@ -567,7 +593,7 @@ def testOperationPrint():
   module.operation.print(enable_debug_info=True, use_local_scope=True)
 
   # Test get_asm with options.
-  # CHECK: value = opaque<"elided_large_const", "0xDEADBEEF"> : tensor<4xi32>
+  # CHECK: value = dense_resource<__elided__> : tensor<4xi32>
   # CHECK: "func.return"(%arg0) : (i32) -> () -:4:7
   module.operation.print(
       large_elements_limit=2,
@@ -594,7 +620,7 @@ def testKnownOpView():
     # addf should map to a known OpView class in the arithmetic dialect.
     # We know the OpView for it defines an 'lhs' attribute.
     addf = module.body.operations[2]
-    # CHECK: <mlir.dialects._arith_ops_gen._AddFOp object
+    # CHECK: <mlir.dialects._arith_ops_gen.AddFOp object
     print(repr(addf))
     # CHECK: "custom.f32"()
     print(addf.lhs)
@@ -656,7 +682,6 @@ def testInvalidOperationStrSoftFails():
   with Location.unknown(ctx):
     invalid_op = create_invalid_operation()
     # Verify that we fallback to the generic printer for safety.
-    # CHECK: // Verification failed, printing generic form
     # CHECK: "builtin.module"() ({
     # CHECK: }) : () -> ()
     print(invalid_op)
@@ -673,7 +698,8 @@ def testInvalidModuleStrSoftFails():
     with InsertionPoint(module.body):
       invalid_op = create_invalid_operation()
     # Verify that we fallback to the generic printer for safety.
-    # CHECK: // Verification failed, printing generic form
+    # CHECK: "builtin.module"() ({
+    # CHECK: }) : () -> ()
     print(module)
 
 
@@ -684,7 +710,7 @@ def testInvalidOperationGetAsmBinarySoftFails():
   with Location.unknown(ctx):
     invalid_op = create_invalid_operation()
     # Verify that we fallback to the generic printer for safety.
-    # CHECK: b'// Verification failed, printing generic form\n
+    # CHECK: b'"builtin.module"() ({\n^bb0:\n}, {\n}) : () -> ()\n'
     print(invalid_op.get_asm(binary=True))
 
 
@@ -875,3 +901,31 @@ def testOperationHash():
   with ctx, Location.unknown():
     op = Operation.create("custom.op1")
     assert hash(op) == hash(op.operation)
+
+
+# CHECK-LABEL: TEST: testOperationParse
+@run
+def testOperationParse():
+  with Context() as ctx:
+    ctx.allow_unregistered_dialects = True
+
+    # Generic operation parsing.
+    m = Operation.parse('module {}')
+    o = Operation.parse('"test.foo"() : () -> ()')
+    assert isinstance(m, ModuleOp)
+    assert type(o) is OpView
+
+    # Parsing specific operation.
+    m = ModuleOp.parse('module {}')
+    assert isinstance(m, ModuleOp)
+    try:
+      ModuleOp.parse('"test.foo"() : () -> ()')
+    except ValueError as e:
+      # CHECK: error: Expected a 'builtin.module' op, got: 'test.foo'
+      print(f"error: {e}")
+    else:
+      assert False, "expected error"
+
+    o = Operation.parse('"test.foo"() : () -> ()', source_name="my-source-string")
+    # CHECK: op_with_source_name: "test.foo"() : () -> () loc("my-source-string":1:1)
+    print(f"op_with_source_name: {o.get_asm(enable_debug_info=True, use_local_scope=True)}")

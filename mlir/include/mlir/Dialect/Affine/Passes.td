@@ -43,22 +43,24 @@ def AffineDataCopyGeneration : Pass<"affine-data-copy-generate", "func::FuncOp">
   ];
 }
 
-def AffineLoopFusion : Pass<"affine-loop-fusion", "func::FuncOp"> {
+def AffineLoopFusion : Pass<"affine-loop-fusion"> {
   let summary = "Fuse affine loop nests";
   let description = [{
-    This pass performs fusion of loop nests using a slicing-based approach. It
-    combines two fusion strategies: producer-consumer fusion and sibling fusion.
-    Producer-consumer fusion is aimed at fusing pairs of loops where the first
-    one writes to a memref that the second reads. Sibling fusion targets pairs
-    of loops that share no dependences between them but that load from the same
-    memref. The fused loop nests, when possible, are rewritten to access
-    significantly smaller local buffers instead of the original memref's, and
-    the latter are often either completely optimized away or contracted. This
-    transformation leads to enhanced locality and lower memory footprint through
-    the elimination or contraction of temporaries/intermediate memref's. These
-    benefits are sometimes achieved at the expense of redundant computation
-    through a cost model that evaluates available choices such as the depth at
-    which a source slice should be materialized in the designation slice.
+    This pass performs fusion of loop nests using a slicing-based approach. The
+    transformation works on an MLIR `Block` granularity and applies to all
+    blocks of the pass is run on. It combines two fusion strategies:
+    producer-consumer fusion and sibling fusion. Producer-consumer fusion is
+    aimed at fusing pairs of loops where the first one writes to a memref that
+    the second reads. Sibling fusion targets pairs of loops that share no
+    dependences between them but that load from the same memref. The fused loop
+    nests, when possible, are rewritten to access significantly smaller local
+    buffers instead of the original memref's, and the latter are often either
+    completely optimized away or contracted. This transformation leads to
+    enhanced locality and lower memory footprint through the elimination or
+    contraction of temporaries/intermediate memref's. These benefits are
+    sometimes achieved at the expense of redundant computation through a cost
+    model that evaluates available choices such as the depth at which a source
+    slice should be materialized in the designation slice.
 
     Example 1: Producer-consumer fusion.
     Input:
@@ -193,8 +195,7 @@ def AffineLoopTiling : Pass<"affine-loop-tile", "func::FuncOp"> {
            "Use this tile size for all loops">,
     ListOption<"tileSizes", "tile-sizes", "unsigned",
                "List of tile sizes for each perfect nest "
-               "(overridden by -tile-size)",
-               "llvm::cl::ZeroOrMore">,
+               "(overridden by -tile-size)">,
   ];
 }
 
@@ -213,6 +214,8 @@ def AffineLoopUnroll : Pass<"affine-loop-unroll", "func::FuncOp"> {
     Option<"unrollFullThreshold", "unroll-full-threshold", "unsigned",
            /*default=*/"1",
            "Unroll all loops with trip count less than or equal to this">,
+    Option<"cleanUpUnroll", "cleanup-unroll", "bool", /*default=*/"false",
+           "Fully unroll the cleanup loop when possible.">,
   ];
 }
 
@@ -296,7 +299,7 @@ def AffinePipelineDataTransfer
 }
 
 def AffineScalarReplacement : Pass<"affine-scalrep", "func::FuncOp"> {
-  let summary = "Replace affine memref acceses by scalars by forwarding stores "
+  let summary = "Replace affine memref accesses by scalars by forwarding stores "
                 "to loads and eliminating redundant loads";
   let description = [{
     This pass performs store to load forwarding and redundant load elimination
@@ -343,12 +346,10 @@ def AffineScalarReplacement : Pass<"affine-scalrep", "func::FuncOp"> {
 
 def AffineVectorize : Pass<"affine-super-vectorize", "func::FuncOp"> {
   let summary = "Vectorize to a target independent n-D vector abstraction";
-  let constructor = "mlir::createSuperVectorizePass()";
   let dependentDialects = ["vector::VectorDialect"];
   let options = [
     ListOption<"vectorSizes", "virtual-vector-size", "int64_t",
-               "Specify an n-D virtual vector size for vectorization",
-               "llvm::cl::ZeroOrMore">,
+               "Specify an n-D virtual vector size for vectorization">,
     // Optionally, the fixed mapping from loop to fastest varying MemRef
     // dimension for all the MemRefs within a loop pattern:
     //   the index represents the loop depth, the value represents the k^th
@@ -358,8 +359,7 @@ def AffineVectorize : Pass<"affine-super-vectorize", "func::FuncOp"> {
     ListOption<"fastestVaryingPattern", "test-fastest-varying", "int64_t",
                "Specify a 1-D, 2-D or 3-D pattern of fastest varying memory "
                "dimensions to match. See defaultPatterns in Vectorize.cpp for "
-               "a description and examples. This is used for testing purposes",
-               "llvm::cl::ZeroOrMore">,
+               "a description and examples. This is used for testing purposes">,
     Option<"vectorizeReductions", "vectorize-reductions", "bool",
            /*default=*/"false",
            "Vectorize known reductions expressed via iter_args. "
@@ -383,19 +383,28 @@ def AffineParallelize : Pass<"affine-parallelize", "func::FuncOp"> {
 def AffineLoopNormalize : Pass<"affine-loop-normalize", "func::FuncOp"> {
   let summary = "Apply normalization transformations to affine loop-like ops";
   let constructor = "mlir::createAffineLoopNormalizePass()";
+  let options = [
+    Option<"promoteSingleIter", "promote-single-iter", "bool",
+           /*default=*/"true", "Promote single iteration loops">,
+  ];
 }
 
 def LoopCoalescing : Pass<"affine-loop-coalescing", "func::FuncOp"> {
   let summary = "Coalesce nested loops with independent bounds into a single "
                 "loop";
   let constructor = "mlir::createLoopCoalescingPass()";
-  let dependentDialects = ["arith::ArithmeticDialect"];
+  let dependentDialects = ["arith::ArithDialect"];
 }
 
 def SimplifyAffineStructures : Pass<"affine-simplify-structures", "func::FuncOp"> {
   let summary = "Simplify affine expressions in maps/sets and normalize "
                 "memrefs";
   let constructor = "mlir::createSimplifyAffineStructuresPass()";
+}
+
+def AffineExpandIndexOps : Pass<"affine-expand-index-ops"> {
+  let summary = "Lower affine operations operating on indices into more fundamental operations";
+  let constructor = "mlir::createAffineExpandIndexOpsPass()";
 }
 
 #endif // MLIR_DIALECT_AFFINE_PASSES

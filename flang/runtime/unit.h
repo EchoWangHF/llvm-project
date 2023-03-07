@@ -70,8 +70,15 @@ public:
   Iostat SetDirection(Direction);
 
   template <typename A, typename... X>
-  IoStatementState &BeginIoStatement(X &&...xs) {
-    lock_.Take(); // dropped in EndIoStatement()
+  IoStatementState &BeginIoStatement(const Terminator &terminator, X &&...xs) {
+    // Take lock_ and hold it until EndIoStatement().
+#if USE_PTHREADS
+    if (!lock_.TakeIfNoDeadlock()) {
+      terminator.Crash("Recursive I/O attempted on unit %d", unitNumber_);
+    }
+#else
+    lock_.Take();
+#endif
     A &state{u_.emplace<A>(std::forward<X>(xs)...)};
     if constexpr (!std::is_same_v<A, OpenStatementState>) {
       state.mutableModes() = ConnectionState::modes;
@@ -94,7 +101,8 @@ public:
   void Endfile(IoErrorHandler &);
   void Rewind(IoErrorHandler &);
   void EndIoStatement();
-  void SetPosition(std::int64_t, IoErrorHandler &); // zero-based
+  bool SetStreamPos(std::int64_t, IoErrorHandler &); // one-based, for POS=
+  bool SetDirectRec(std::int64_t, IoErrorHandler &); // one-based, for REC=
   std::int64_t InquirePos() const {
     // 12.6.2.11 defines POS=1 as the beginning of file
     return frameOffsetInFile_ + recordOffsetInFrame_ + positionInRecord + 1;
@@ -108,8 +116,10 @@ public:
   bool Wait(int);
 
 private:
+  static UnitMap &CreateUnitMap();
   static UnitMap &GetUnitMap();
   const char *FrameNextInput(IoErrorHandler &, std::size_t);
+  void SetPosition(std::int64_t, IoErrorHandler &); // zero-based
   void BeginSequentialVariableUnformattedInputRecord(IoErrorHandler &);
   void BeginVariableFormattedInputRecord(IoErrorHandler &);
   void BackspaceFixedRecord(IoErrorHandler &);
@@ -121,6 +131,7 @@ private:
   void CommitWrites();
   bool CheckDirectAccess(IoErrorHandler &);
   void HitEndOnRead(IoErrorHandler &);
+  std::int32_t ReadHeaderOrFooter(std::int64_t frameOffset);
 
   Lock lock_;
 

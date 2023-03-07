@@ -1,6 +1,6 @@
 import contextlib
 import os
-import unittest2
+from os.path import exists
 import lldb
 from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
@@ -16,6 +16,9 @@ def apple_silicon():
     features = subprocess.check_output(["sysctl", "machdep.cpu"])
     return "Apple M" in features.decode('utf-8')
 
+
+def rosetta_debugserver_installed():
+    return exists("/Library/Apple/usr/libexec/oah/debugserver")
 
 class TestLaunchProcessPosixSpawn(TestBase):
     NO_DEBUG_INFO_TESTCASE = True
@@ -35,7 +38,7 @@ class TestLaunchProcessPosixSpawn(TestBase):
         self.runCmd('run')
 
         process = self.dbg.GetSelectedTarget().process
-        self.assertEqual(process.GetState(), lldb.eStateExited)
+        self.assertState(process.GetState(), lldb.eStateExited)
         self.assertIn('slice: {}'.format(arch), process.GetSTDOUT(1000))
 
     @skipUnlessDarwin
@@ -57,5 +60,6 @@ class TestLaunchProcessPosixSpawn(TestBase):
     def test_apple_silicon(self):
         self.build()
         exe = self.getBuildArtifact("fat.out")
-        self.run_arch(exe, 'x86_64')
+        if rosetta_debugserver_installed():
+            self.run_arch(exe, 'x86_64')
         self.run_arch(exe, 'arm64')

@@ -30,6 +30,7 @@
 # FULL-NEXT: workGroupIDX:    { reg: '$sgpr6' }
 # FULL-NEXT: workGroupIDY:    { reg: '$sgpr13' }
 # FULL-NEXT: workGroupIDZ:    { reg: '$sgpr14' }
+# FULL-NEXT: LDSKernelId:     { reg: '$sgpr15' }
 # FULL-NEXT: privateSegmentWaveByteOffset: { reg: '$sgpr7' }
 # FULL-NEXT: implicitArgPtr:  { reg: '$sgpr8_sgpr9' }
 # FULL-NEXT: workItemIDX:     { reg: '$vgpr0' }
@@ -43,7 +44,7 @@
 # FULL-NEXT: fp64-fp16-input-denormals: true
 # FULL-NEXT: fp64-fp16-output-denormals: true
 # FULL-NEXT:  highBitsOf32BitAddress: 0
-# FULL-NEXT:  occupancy: 10
+# FULL-NEXT:  occupancy: 8
 # FULL-NEXT:  vgprForAGPRCopy: ''
 # FULL-NEXT: body:
 
@@ -67,12 +68,13 @@
 # SIMPLE-NEXT: workGroupIDX:    { reg: '$sgpr6' }
 # SIMPLE-NEXT: workGroupIDY:    { reg: '$sgpr13' }
 # SIMPLE-NEXT: workGroupIDZ:    { reg: '$sgpr14' }
+# SIMPLE-NEXT: LDSKernelId:     { reg: '$sgpr15' }
 # SIMPLE-NEXT: privateSegmentWaveByteOffset: { reg: '$sgpr7' }
 # SIMPLE-NEXT: implicitArgPtr:  { reg: '$sgpr8_sgpr9' }
 # SIMPLE-NEXT: workItemIDX: { reg: '$vgpr0' }
 # SIMPLE-NEXT: workItemIDY:     { reg: '$vgpr31', mask: 1047552 }
 # SIMPLE-NEXT: workItemIDZ:     { reg: '$vgpr31', mask: 1072693248 }
-# SIMPLE-NEXT: occupancy: 10
+# SIMPLE-NEXT: occupancy: 8
 # SIMPLE-NEXT: body:
 name: kernel0
 machineFunctionInfo:
@@ -127,6 +129,7 @@ body:             |
 # FULL-NEXT: workGroupIDX:    { reg: '$sgpr12' }
 # FULL-NEXT: workGroupIDY:    { reg: '$sgpr13' }
 # FULL-NEXT: workGroupIDZ:    { reg: '$sgpr14' }
+# FULL-NEXT: LDSKernelId:     { reg: '$sgpr15' }
 # FULL-NEXT: implicitArgPtr:  { reg: '$sgpr8_sgpr9' }
 # FULL-NEXT: workItemIDX:     { reg: '$vgpr31', mask: 1023 }
 # FULL-NEXT: workItemIDY:     { reg: '$vgpr31', mask: 1047552 }
@@ -139,7 +142,7 @@ body:             |
 # FULL-NEXT: fp64-fp16-input-denormals: true
 # FULL-NEXT: fp64-fp16-output-denormals: true
 # FULL-NEXT:  highBitsOf32BitAddress: 0
-# FULL-NEXT:  occupancy: 10
+# FULL-NEXT:  occupancy: 8
 # FULL-NEXT: vgprForAGPRCopy: ''
 # FULL-NEXT: body:
 
@@ -153,11 +156,12 @@ body:             |
 # SIMPLE-NEXT: workGroupIDX:    { reg: '$sgpr12' }
 # SIMPLE-NEXT: workGroupIDY:    { reg: '$sgpr13' }
 # SIMPLE-NEXT: workGroupIDZ:    { reg: '$sgpr14' }
+# SIMPLE-NEXT: LDSKernelId:     { reg: '$sgpr15' }
 # SIMPLE-NEXT: implicitArgPtr:  { reg: '$sgpr8_sgpr9' }
 # SIMPLE-NEXT: workItemIDX:     { reg: '$vgpr31', mask: 1023 }
 # SIMPLE-NEXT: workItemIDY:     { reg: '$vgpr31', mask: 1047552 }
 # SIMPLE-NEXT: workItemIDZ:     { reg: '$vgpr31', mask: 1072693248 }
-# SIMPLE-NEXT:  occupancy: 10
+# SIMPLE-NEXT:  occupancy: 8
 # SIMPLE-NEXT: body:
 
 name: no_mfi
@@ -194,6 +198,7 @@ body:             |
 # FULL-NEXT: workGroupIDX:    { reg: '$sgpr12' }
 # FULL-NEXT: workGroupIDY:    { reg: '$sgpr13' }
 # FULL-NEXT: workGroupIDZ:    { reg: '$sgpr14' }
+# FULL-NEXT: LDSKernelId:     { reg: '$sgpr15' }
 # FULL-NEXT: implicitArgPtr:  { reg: '$sgpr8_sgpr9' }
 # FULL-NEXT: workItemIDX:     { reg: '$vgpr31', mask: 1023 }
 # FULL-NEXT: workItemIDY:     { reg: '$vgpr31', mask: 1047552 }
@@ -206,7 +211,7 @@ body:             |
 # FULL-NEXT: fp64-fp16-input-denormals: true
 # FULL-NEXT: fp64-fp16-output-denormals: true
 # FULL-NEXT:  highBitsOf32BitAddress: 0
-# FULL-NEXT:  occupancy: 10
+# FULL-NEXT:  occupancy: 8
 # FULL-NEXT: vgprForAGPRCopy: ''
 # FULL-NEXT: body:
 
@@ -220,11 +225,12 @@ body:             |
 # SIMPLE-NEXT: workGroupIDX:    { reg: '$sgpr12' }
 # SIMPLE-NEXT: workGroupIDY:    { reg: '$sgpr13' }
 # SIMPLE-NEXT: workGroupIDZ:    { reg: '$sgpr14' }
+# SIMPLE-NEXT: LDSKernelId:     { reg: '$sgpr15' }
 # SIMPLE-NEXT: implicitArgPtr:  { reg: '$sgpr8_sgpr9' }
 # SIMPLE-NEXT: workItemIDX:     { reg: '$vgpr31', mask: 1023 }
 # SIMPLE-NEXT: workItemIDY:     { reg: '$vgpr31', mask: 1047552 }
 # SIMPLE-NEXT: workItemIDZ:     { reg: '$vgpr31', mask: 1072693248 }
-# SIMPLE-NEXT:  occupancy: 10
+# SIMPLE-NEXT:  occupancy: 8
 # SIMPLE-NEXT: body:
 
 name: empty_mfi
@@ -262,6 +268,7 @@ body:             |
 # FULL-NEXT: workGroupIDX:    { reg: '$sgpr12' }
 # FULL-NEXT: workGroupIDY:    { reg: '$sgpr13' }
 # FULL-NEXT: workGroupIDZ:    { reg: '$sgpr14' }
+# FULL-NEXT: LDSKernelId:     { reg: '$sgpr15' }
 # FULL-NEXT: implicitArgPtr:  { reg: '$sgpr8_sgpr9' }
 # FULL-NEXT: workItemIDX:     { reg: '$vgpr31', mask: 1023 }
 # FULL-NEXT: workItemIDY:     { reg: '$vgpr31', mask: 1047552 }
@@ -274,7 +281,7 @@ body:             |
 # FULL-NEXT: fp64-fp16-input-denormals: true
 # FULL-NEXT: fp64-fp16-output-denormals: true
 # FULL-NEXT:  highBitsOf32BitAddress: 0
-# FULL-NEXT:  occupancy: 10
+# FULL-NEXT:  occupancy: 8
 # FULL-NEXT: vgprForAGPRCopy: ''
 # FULL-NEXT: body:
 
@@ -289,11 +296,12 @@ body:             |
 # SIMPLE-NEXT: workGroupIDX:    { reg: '$sgpr12' }
 # SIMPLE-NEXT: workGroupIDY:    { reg: '$sgpr13' }
 # SIMPLE-NEXT: workGroupIDZ:    { reg: '$sgpr14' }
+# SIMPLE-NEXT: LDSKernelId:     { reg: '$sgpr15' }
 # SIMPLE-NEXT: implicitArgPtr:  { reg: '$sgpr8_sgpr9' }
 # SIMPLE-NEXT: workItemIDX:     { reg: '$vgpr31', mask: 1023 }
 # SIMPLE-NEXT: workItemIDY:     { reg: '$vgpr31', mask: 1047552 }
 # SIMPLE-NEXT: workItemIDZ:     { reg: '$vgpr31', mask: 1072693248 }
-# SIMPLE-NEXT: occupancy: 10
+# SIMPLE-NEXT: occupancy: 8
 # SIMPLE-NEXT: body:
 
 name: empty_mfi_entry_func
@@ -341,6 +349,7 @@ body:             |
 # SIMPLE-NEXT: workGroupIDX:    { reg: '$sgpr12' }
 # SIMPLE-NEXT: workGroupIDY:    { reg: '$sgpr13' }
 # SIMPLE-NEXT: workGroupIDZ:    { reg: '$sgpr14' }
+# SIMPLE-NEXT: LDSKernelId:     { reg: '$sgpr15' }
 # SIMPLE-NEXT: implicitArgPtr:  { reg: '$sgpr8_sgpr9' }
 # SIMPLE-NEXT: workItemIDX:     { reg: '$vgpr31', mask: 1023 }
 # SIMPLE-NEXT: workItemIDY:     { reg: '$vgpr0', mask: 65280 }
@@ -421,7 +430,7 @@ body:             |
 
 ---
 # ALL-LABEL: name: occupancy_0
-# ALL: occupancy: 10
+# ALL: occupancy: 8
 name: occupancy_0
 machineFunctionInfo:
   occupancy: 0

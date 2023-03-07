@@ -1,4 +1,5 @@
-// RUN: mlir-opt -allow-unregistered-dialect %s -split-input-file -pass-pipeline='func.func(canonicalize)' | FileCheck %s
+// RUN: mlir-opt -allow-unregistered-dialect %s -split-input-file -canonicalize="test-convergence" | FileCheck %s
+// RUN: mlir-opt -allow-unregistered-dialect %s -split-input-file -canonicalize="test-convergence top-down=0" | FileCheck %s --check-prefix=CHECK-BOTTOM-UP
 
 // -----
 
@@ -17,7 +18,7 @@ func.func @compose_affine_maps_1dto2d_no_symbols() {
     %x1_1 = affine.apply affine_map<(d0, d1) -> (d1)> (%x0, %x0)
 
     // CHECK: %[[I0A:.*]] = affine.apply #[[$MAP0]](%{{.*}})
-    // CHECK-NEXT: %[[V0:.*]] = memref.load %0[%[[I0A]], %[[I0A]]]
+    // CHECK-NEXT: %[[V0:.*]] = memref.load %{{.*}}[%[[I0A]], %[[I0A]]]
     %v0 = memref.load %0[%x1_0, %x1_1] : memref<4x4xf32>
 
     // Test store[%y, %y]
@@ -26,20 +27,20 @@ func.func @compose_affine_maps_1dto2d_no_symbols() {
     %y1_1 = affine.apply affine_map<(d0, d1) -> (d1)> (%y0, %y0)
 
     // CHECK-NEXT: %[[I1A:.*]] = affine.apply #[[$MAP1]](%{{.*}})
-    // CHECK-NEXT: memref.store %[[V0]], %0[%[[I1A]], %[[I1A]]]
+    // CHECK-NEXT: memref.store %[[V0]], %{{.*}}[%[[I1A]], %[[I1A]]]
     memref.store %v0, %0[%y1_0, %y1_1] : memref<4x4xf32>
 
     // Test store[%x, %y]
     %xy_0 = affine.apply affine_map<(d0, d1) -> (d0)> (%x0, %y0)
     %xy_1 = affine.apply affine_map<(d0, d1) -> (d1)> (%x0, %y0)
 
-    // CHECK-NEXT: memref.store %[[V0]], %0[%[[I0A]], %[[I1A]]]
+    // CHECK-NEXT: memref.store %[[V0]], %{{.*}}[%[[I0A]], %[[I1A]]]
     memref.store %v0, %0[%xy_0, %xy_1] : memref<4x4xf32>
 
     // Test store[%y, %x]
     %yx_0 = affine.apply affine_map<(d0, d1) -> (d0)> (%y0, %x0)
     %yx_1 = affine.apply affine_map<(d0, d1) -> (d1)> (%y0, %x0)
-    // CHECK-NEXT: memref.store %[[V0]], %0[%[[I1A]], %[[I0A]]]
+    // CHECK-NEXT: memref.store %[[V0]], %{{.*}}[%[[I1A]], %[[I0A]]]
     memref.store %v0, %0[%yx_0, %yx_1] : memref<4x4xf32>
   }
   return
@@ -98,13 +99,13 @@ func.func @compose_affine_maps_2d_tile(%0: memref<16x32xf32>, %1: memref<16x32xf
   %c4 = arith.constant 4 : index
   %c8 = arith.constant 8 : index
 
-  affine.for %i0 = 0 to 3 {
+  affine.for %i0 = 0 to 16 {
     %x0 = affine.apply affine_map<(d0)[s0] -> (d0 ceildiv s0)> (%i0)[%c4]
-    affine.for %i1 = 0 to 3 {
+    affine.for %i1 = 0 to 16 {
       %x1 = affine.apply affine_map<(d0)[s0] -> (d0 ceildiv s0)> (%i1)[%c8]
-      affine.for %i2 = 0 to 3 {
+      affine.for %i2 = 0 to 16 {
         %x2 = affine.apply affine_map<(d0)[s0] -> (d0 mod s0)> (%i2)[%c4]
-        affine.for %i3 = 0 to 3 {
+        affine.for %i3 = 0 to 16 {
           %x3 = affine.apply affine_map<(d0)[s0] -> (d0 mod s0)> (%i3)[%c8]
 
           %x40 = affine.apply affine_map<(d0, d1, d2, d3)[s0, s1] ->
@@ -622,6 +623,28 @@ func.func @canonicalize_affine_if(%M : index, %N : index) {
 
 // -----
 
+// CHECK-DAG: #[[$SET:.*]] = affine_set<(d0, d1)[s0] : (d0 - 1 >= 0, d1 - 1 == 0, -d0 + s0 + 10 >= 0)>
+
+// CHECK-LABEL: func @canonicalize_affine_if_compose_apply
+// CHECK-SAME:   %[[N:.*]]: index
+func.func @canonicalize_affine_if_compose_apply(%N: index) {
+  %M = affine.apply affine_map<()[s0] -> (s0 + 10)> ()[%N]
+  // CHECK-NEXT: affine.for %[[I:.*]] =
+  affine.for %i = 0 to 1024 {
+    // CHECK-NEXT: affine.for %[[J:.*]] =
+    affine.for %j = 0 to 100 {
+      %j_ = affine.apply affine_map<(d0)[] -> (d0 + 1)> (%j)
+      // CHECK-NEXT: affine.if #[[$SET]](%[[I]], %[[J]])[%[[N]]]
+      affine.if affine_set<(d0, d1)[s0] : (d0 - 1 >= 0, d1 - 2 == 0, -d0 + s0 >= 0)>(%i, %j_)[%M] {
+        "test.foo"() : ()->()
+      }
+    }
+  }
+  return
+}
+
+// -----
+
 // CHECK-DAG: #[[$LBMAP:.*]] = affine_map<()[s0] -> (0, s0)>
 // CHECK-DAG: #[[$UBMAP:.*]] = affine_map<()[s0] -> (1024, s0 * 2)>
 
@@ -1127,4 +1150,148 @@ module {
     }
     return %s: memref<32x64xf32>
   }
+}
+
+// -----
+
+// Simplification of maps exploiting operand info.
+
+// CHECK: #[[$MAP_SIMPLER:.*]] = affine_map<(d0, d1) -> (((d0 + d1) mod 458313) floordiv 227)>
+
+// CHECK-LABEL: func @simplify_with_operands
+func.func @simplify_with_operands(%N: index, %A: memref<?x32xf32>) {
+  // CHECK-NEXT: affine.for %[[I:.*]] = 0 to %{{.*}}
+  affine.for %i = 0 to %N step 32 {
+    // CHECK-NEXT: affine.for %[[II:.*]] = 0 to 32
+    affine.for %ii = 0 to 32 {
+      // %ii is less than 32 and %i divides 32.
+      // CHECK: affine.load %{{.*}}[0, 0]
+      %x = affine.load %A[%ii floordiv 32, %i mod 32] : memref<?x32xf32>
+      "test.foo"(%x) : (f32) -> ()
+
+      // %i is aligned at 32 boundary and %ii < 32.
+      // CHECK: affine.load %{{.*}}[%[[I]] floordiv 32, %[[II]] mod 16]
+      %a = affine.load %A[(%i + %ii) floordiv 32, (%i + %ii) mod 16] : memref<?x32xf32>
+      "test.foo"(%a) : (f32) -> ()
+      // CHECK: affine.load %{{.*}}[%[[I]] floordiv 64, (%[[I]] + %[[II]]) mod 64]
+      %b = affine.load %A[(%i + %ii) floordiv 64, (%i + %ii) mod 64] : memref<?x32xf32>
+      "test.foo"(%b) : (f32) -> ()
+      // CHECK: affine.load %{{.*}}[(%[[I]] + %[[II]]) floordiv 16, %[[II]] mod 16]
+      %c = affine.load %A[(%i + %ii) floordiv 16, (%i + %ii) mod 16] : memref<?x32xf32>
+      "test.foo"(%c) : (f32) -> ()
+    }
+  }
+
+  // Should not simplify.
+  affine.for %i = -1 to 32 {
+    // CHECK: affine.load %{{.*}}[%{{.*}} floordiv {{.*}}, %{{.*}} mod {{.*}}] :
+    %x = affine.load %A[%i floordiv 32, %i mod 32] : memref<?x32xf32>
+    "test.foo"(%x) : (f32) -> ()
+  }
+
+  affine.for %arg0 = 0 to %N step 128 {
+    affine.for %arg4 = 0 to 32 step 32 {
+      affine.for %arg5 = 0 to 128 {
+        // CHECK: affine.apply #[[$MAP_SIMPLER]]
+        %x = affine.apply affine_map<(d0, d1, d2) -> (((d0 + d2) mod 458313) floordiv 227 + d1 floordiv 256)>(%arg0, %arg4, %arg5)
+        "test.foo"(%x) : (index) -> ()
+      }
+    }
+  }
+
+  return
+}
+
+// CHECK-LABEL: func @simplify_div_mod_with_operands
+func.func @simplify_div_mod_with_operands(%N: index, %A: memref<64xf32>, %unknown: index) {
+  // CHECK: affine.for %[[I:.*]] = 0 to 32
+  %cst = arith.constant 1.0 : f32
+  affine.for %i = 0 to 32 {
+    // CHECK: affine.store %{{.*}}, %{{.*}}[0]
+    affine.store %cst, %A[%i floordiv 32] : memref<64xf32>
+    // CHECK: affine.store %{{.*}}, %{{.*}}[1]
+    affine.store %cst, %A[(%i + 1) ceildiv 32] : memref<64xf32>
+    // CHECK: affine.store %{{.*}}, %{{.*}}[%[[I]]]
+    affine.store %cst, %A[%i mod 32] : memref<64xf32>
+    // CHECK: affine.store %{{.*}}, %{{.*}}[0]
+    affine.store %cst, %A[2 * %i floordiv 64] : memref<64xf32>
+    // CHECK: affine.store %{{.*}}, %{{.*}}[0]
+    affine.store %cst, %A[(%i mod 16) floordiv 16] : memref<64xf32>
+
+    // The ones below can't be simplified.
+    affine.store %cst, %A[%i floordiv 16] : memref<64xf32>
+    affine.store %cst, %A[%i mod 16] : memref<64xf32>
+    affine.store %cst, %A[(%i mod 16) floordiv 15] : memref<64xf32>
+    affine.store %cst, %A[%i mod 31] : memref<64xf32>
+    // CHECK:      affine.store %{{.*}}, %{{.*}}[%{{.*}} floordiv 16] : memref<64xf32>
+    // CHECK-NEXT: affine.store %{{.*}}, %{{.*}}[%{{.*}} mod 16] : memref<64xf32>
+    // CHECK-NEXT: affine.store %{{.*}}, %{{.*}}[(%{{.*}} mod 16) floordiv 15] : memref<64xf32>
+    // CHECK-NEXT: affine.store %{{.*}}, %{{.*}}[%{{.*}} mod 31] : memref<64xf32>
+  }
+
+  affine.for %i = -8 to 32 {
+    // Can't be simplified.
+    // CHECK: affine.store %{{.*}}, %{{.*}}[%{{.*}} floordiv 32] : memref<64xf32>
+    affine.store %cst, %A[%i floordiv 32] : memref<64xf32>
+    // CHECK: affine.store %{{.*}}, %{{.*}}[%{{.*}} mod 32] : memref<64xf32>
+    affine.store %cst, %A[%i mod 32] : memref<64xf32>
+    // floordiv rounds toward -inf; (%i - 96) floordiv 64 will be -2.
+    // CHECK: affine.store %{{.*}}, %{{.*}}[0] : memref<64xf32>
+    affine.store %cst, %A[2 + (%i - 96) floordiv 64] : memref<64xf32>
+  }
+
+  // CHECK: affine.for %[[II:.*]] = 8 to 16
+  affine.for %i = 8 to 16 {
+    // CHECK: affine.store %{{.*}}, %{{.*}}[1] : memref<64xf32>
+    affine.store %cst, %A[%i floordiv 8] : memref<64xf32>
+    // CHECK: affine.store %{{.*}}, %{{.*}}[2] : memref<64xf32>
+    affine.store %cst, %A[(%i + 1) ceildiv 8] : memref<64xf32>
+    // CHECK: affine.store %{{.*}}, %{{.*}}[%[[II]] mod 8] : memref<64xf32>
+    affine.store %cst, %A[%i mod 8] : memref<64xf32>
+    // CHECK: affine.store %{{.*}}, %{{.*}}[%[[II]]] : memref<64xf32>
+    affine.store %cst, %A[%i mod 32] : memref<64xf32>
+    // Upper bound on the mod 32 expression will be 15.
+    // CHECK: affine.store %{{.*}}, %{{.*}}[0] : memref<64xf32>
+    affine.store %cst, %A[(%i mod 32) floordiv 16] : memref<64xf32>
+    // Lower bound on the mod 16 expression will be 8.
+    // CHECK: affine.store %{{.*}}, %{{.*}}[1] : memref<64xf32>
+    affine.store %cst, %A[(%i mod 16) floordiv 8] : memref<64xf32>
+    // CHECK: affine.store %{{.*}}, %{{.*}}[0] : memref<64xf32>
+    affine.store %cst, %A[(%unknown mod 16) floordiv 16] : memref<64xf32>
+  }
+  return
+}
+
+// -----
+
+//           CHECK: #[[$map:.*]] = affine_map<()[s0] -> (s0 * ((-s0 + 40961) ceildiv 512))>
+// CHECK-BOTTOM-UP: #[[$map:.*]] = affine_map<()[s0] -> (s0 * ((-s0 + 40961) ceildiv 512))>
+//           CHECK-LABEL: func @regression_do_not_perform_invalid_replacements
+// CHECK-BOTTOM-UP-LABEL: func @regression_do_not_perform_invalid_replacements
+func.func @regression_do_not_perform_invalid_replacements(%arg0: index) {
+  // Dim must be promoted to sym before combining both maps.
+  //           CHECK: %[[apply:.*]] = affine.apply #[[$map]]()[%{{.*}}]
+  // CHECK-BOTTOM-UP: %[[apply:.*]] = affine.apply #[[$map]]()[%{{.*}}]
+  %0 = affine.apply affine_map<(d0) -> (-d0 + 40961)>(%arg0)
+  %1 = affine.apply affine_map<(d0)[s0] -> (d0 * (s0 ceildiv 512))>(%arg0)[%0]
+  //           CHECK: "test.foo"(%[[apply]])
+  // CHECK-BOTTOM-UP: "test.foo"(%[[apply]])
+  "test.foo"(%1) : (index) -> ()
+  return
+}
+
+// -----
+// CHECK-LABEL: func @min.oneval(%arg0: index)
+func.func @min.oneval(%arg0: index) -> index {
+  %min = affine.min affine_map<()[s0] -> (s0)> ()[%arg0]
+  // CHECK: return %arg0 : index
+  return %min: index
+}
+
+// -----
+// CHECK-LABEL: func @max.oneval(%arg0: index)
+func.func @max.oneval(%arg0: index) -> index {
+  %max = affine.max affine_map<()[s0] -> (s0)> ()[%arg0]
+  // CHECK: return %arg0 : index
+  return %max: index
 }

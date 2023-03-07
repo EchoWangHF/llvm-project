@@ -1,9 +1,8 @@
 #!/usr/bin/env python
 
-from __future__ import print_function
-
 import argparse
 import os
+import platform
 import shutil
 import signal
 import subprocess
@@ -110,6 +109,12 @@ parser.add_argument('inputs',
                     metavar='file',
                     nargs='+',
                     help='Source file(s) to compile / object file(s) to link')
+
+parser.add_argument('--std',
+                    metavar='std',
+                    dest='std',
+                    required=False,
+                    help='Specify the C/C++ standard.')
 
 
 args = parser.parse_args(args=sys.argv[1:])
@@ -232,6 +237,7 @@ class Builder(object):
         self.verbose = args.verbose
         self.obj_ext = obj_ext
         self.lib_paths = args.libs_dir
+        self.std = args.std
 
     def _exe_file_name(self):
         assert self.mode != 'compile'
@@ -276,7 +282,7 @@ class MsvcBuilder(Builder):
     def __init__(self, toolchain_type, args):
         Builder.__init__(self, toolchain_type, args, '.obj')
 
-        if os.getenv('PLATFORM') == 'arm64':
+        if platform.uname().machine.lower() == 'arm64':
             self.msvc_arch_str = 'arm' if self.arch == '32' else 'arm64'
         else:
             self.msvc_arch_str = 'x86' if self.arch == '32' else 'x64'
@@ -582,6 +588,9 @@ class MsvcBuilder(Builder):
             args.append('--')
         args.append(source)
 
+        if self.std:
+            args.append('/std:' + self.std)
+
         return ('compiling', [source], obj,
                 self.compile_env,
                 args)
@@ -652,6 +661,9 @@ class GccBuilder(Builder):
 
         if sys.platform == 'darwin':
             args.extend(['-isysroot', self.apple_sdk])
+
+        if self.std:
+            args.append('-std={0}'.format(self.std))
 
         return ('compiling', [source], obj, None, args)
 
@@ -790,6 +802,7 @@ if args.verbose:
     print('  Verbose: ' + str(args.verbose))
     print('  Dryrun: ' + str(args.dry))
     print('  Inputs: ' + format_text(args.inputs, 0, 10))
+    print('  C/C++ Standard: ' + str(args.std))
     print('Script Environment:')
     print_environment(os.environ)
 

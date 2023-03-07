@@ -13,6 +13,7 @@
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCObjectWriter.h"
+#include "llvm/MC/MCValue.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
@@ -61,7 +62,9 @@ unsigned RISCVELFObjectWriter::getRelocType(MCContext &Ctx,
       return ELF::R_RISCV_NONE;
     case FK_Data_4:
     case FK_PCRel_4:
-      return ELF::R_RISCV_32_PCREL;
+      return Target.getAccessVariant() == MCSymbolRefExpr::VK_PLT
+                 ? ELF::R_RISCV_PLT32
+                 : ELF::R_RISCV_32_PCREL;
     case RISCV::fixup_riscv_pcrel_hi20:
       return ELF::R_RISCV_PCREL_HI20;
     case RISCV::fixup_riscv_pcrel_lo12_i:
@@ -83,7 +86,7 @@ unsigned RISCVELFObjectWriter::getRelocType(MCContext &Ctx,
     case RISCV::fixup_riscv_rvc_branch:
       return ELF::R_RISCV_RVC_BRANCH;
     case RISCV::fixup_riscv_call:
-      return ELF::R_RISCV_CALL;
+      return ELF::R_RISCV_CALL_PLT;
     case RISCV::fixup_riscv_call_plt:
       return ELF::R_RISCV_CALL_PLT;
     case RISCV::fixup_riscv_add_8:

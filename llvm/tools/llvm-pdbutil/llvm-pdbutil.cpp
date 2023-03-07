@@ -84,7 +84,6 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/LineIterator.h"
-#include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/PrettyStackTrace.h"
@@ -378,8 +377,8 @@ cl::OptionCategory PdbBytes("PDB Stream Options");
 cl::OptionCategory Types("Type Options");
 cl::OptionCategory ModuleCategory("Module Options");
 
-llvm::Optional<NumberRange> DumpBlockRange;
-llvm::Optional<NumberRange> DumpByteRange;
+std::optional<NumberRange> DumpBlockRange;
+std::optional<NumberRange> DumpByteRange;
 
 cl::opt<std::string> DumpBlockRangeOpt(
     "block-range", cl::value_desc("start[-end]"),
@@ -791,7 +790,7 @@ static void yamlToPdb(StringRef Path) {
   PDBFileBuilder Builder(Allocator);
 
   uint32_t BlockSize = 4096;
-  if (YamlObj.Headers.hasValue())
+  if (YamlObj.Headers)
     BlockSize = YamlObj.Headers->SuperBlock.BlockSize;
   ExitOnErr(Builder.initialize(BlockSize));
   // Add each of the reserved streams.  We ignore stream metadata in the
@@ -806,7 +805,7 @@ static void yamlToPdb(StringRef Path) {
   StringsAndChecksums Strings;
   Strings.setStrings(std::make_shared<DebugStringTableSubsection>());
 
-  if (YamlObj.StringTable.hasValue()) {
+  if (YamlObj.StringTable) {
     for (auto S : *YamlObj.StringTable)
       Strings.strings()->insert(S);
   }
@@ -841,7 +840,7 @@ static void yamlToPdb(StringRef Path) {
 
     for (auto S : MI.SourceFiles)
       ExitOnErr(DbiBuilder.addModuleSourceFile(ModiBuilder, S));
-    if (MI.Modi.hasValue()) {
+    if (MI.Modi) {
       const auto &ModiStream = *MI.Modi;
       for (auto Symbol : ModiStream.Symbols) {
         ModiBuilder.addSymbol(
@@ -866,7 +865,7 @@ static void yamlToPdb(StringRef Path) {
   AppendingTypeTableBuilder TS(Allocator);
   for (const auto &R : Tpi.Records) {
     CVType Type = R.toCodeViewRecord(TS);
-    TpiBuilder.addTypeRecord(Type.RecordData, None);
+    TpiBuilder.addTypeRecord(Type.RecordData, std::nullopt);
   }
 
   const auto &Ipi = YamlObj.IpiStream.value_or(DefaultIpiStream);
@@ -874,7 +873,7 @@ static void yamlToPdb(StringRef Path) {
   IpiBuilder.setVersionHeader(Ipi.Version);
   for (const auto &R : Ipi.Records) {
     CVType Type = R.toCodeViewRecord(TS);
-    IpiBuilder.addTypeRecord(Type.RecordData, None);
+    IpiBuilder.addTypeRecord(Type.RecordData, std::nullopt);
   }
 
   Builder.getStringTableBuilder().setStrings(*Strings.strings());
@@ -1354,10 +1353,10 @@ static void mergePdbs() {
   auto &DestTpi = Builder.getTpiBuilder();
   auto &DestIpi = Builder.getIpiBuilder();
   MergedTpi.ForEachRecord([&DestTpi](TypeIndex TI, const CVType &Type) {
-    DestTpi.addTypeRecord(Type.RecordData, None);
+    DestTpi.addTypeRecord(Type.RecordData, std::nullopt);
   });
   MergedIpi.ForEachRecord([&DestIpi](TypeIndex TI, const CVType &Type) {
-    DestIpi.addTypeRecord(Type.RecordData, None);
+    DestIpi.addTypeRecord(Type.RecordData, std::nullopt);
   });
   Builder.getInfoBuilder().addFeature(PdbRaw_FeatureSig::VC140);
 
@@ -1423,7 +1422,7 @@ static void exportStream() {
 }
 
 static bool parseRange(StringRef Str,
-                       Optional<opts::bytes::NumberRange> &Parsed) {
+                       std::optional<opts::bytes::NumberRange> &Parsed) {
   if (Str.empty())
     return true;
 

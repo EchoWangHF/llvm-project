@@ -34,6 +34,8 @@
 #include "mlir/IR/Dialect.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Support/LLVM.h"
+#include "mlir/Target/LLVMIR/Import.h"
 #include "mlir/Target/LLVMIR/ModuleTranslation.h"
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/DiagnosticFrontend.h"
@@ -45,13 +47,22 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/Object/OffloadBinary.h"
 #include "llvm/Passes/PassBuilder.h"
+#include "llvm/Passes/PassPlugin.h"
+#include "llvm/Passes/StandardInstrumentations.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Transforms/Utils/ModuleUtils.h"
 #include <memory>
 
 using namespace Fortran::frontend;
+
+// Declare plugin extension function declarations.
+#define HANDLE_EXTENSION(Ext)                                                  \
+  llvm::PassPluginLibraryInfo get##Ext##PluginInfo();
+#include "llvm/Support/Extension.def"
 
 //===----------------------------------------------------------------------===//
 // Custom BeginSourceFileAction
@@ -76,6 +87,16 @@ bool PrescanAndSemaDebugAction::beginSourceFileAction() {
   // compiler workflows!
   return runPrescan() && runParse() && (runSemanticChecks() || true) &&
          (generateRtTypeTables() || true);
+}
+
+static void setMLIRDataLayout(mlir::ModuleOp &mlirModule,
+                              const llvm::DataLayout &dl) {
+  mlir::MLIRContext *context = mlirModule.getContext();
+  mlirModule->setAttr(
+      mlir::LLVM::LLVMDialect::getDataLayoutAttrName(),
+      mlir::StringAttr::get(context, dl.getStringRepresentation()));
+  mlir::DataLayoutSpecInterface dlSpec = mlir::translateDataLayout(dl, context);
+  mlirModule->setAttr(mlir::DLTIDialect::kDataLayoutAttrName, dlSpec);
 }
 
 bool CodeGenAction::beginSourceFileAction() {
@@ -122,6 +143,9 @@ bool CodeGenAction::beginSourceFileAction() {
     }
 
     mlirModule = std::make_unique<mlir::ModuleOp>(module.release());
+    setUpTargetMachine();
+    const llvm::DataLayout &dl = tm->createDataLayout();
+    setMLIRDataLayout(*mlirModule, dl);
     return true;
   }
 
@@ -141,20 +165,29 @@ bool CodeGenAction::beginSourceFileAction() {
   // Create a LoweringBridge
   const common::IntrinsicTypeDefaultKinds &defKinds =
       ci.getInvocation().getSemanticsContext().defaultKinds();
-  fir::KindMapping kindMap(mlirCtx.get(),
-      llvm::ArrayRef<fir::KindTy>{fir::fromDefaultKinds(defKinds)});
+  fir::KindMapping kindMap(mlirCtx.get(), llvm::ArrayRef<fir::KindTy>{
+                                              fir::fromDefaultKinds(defKinds)});
   lower::LoweringBridge lb = Fortran::lower::LoweringBridge::create(
-      *mlirCtx, defKinds, ci.getInvocation().getSemanticsContext().intrinsics(),
+      *mlirCtx, ci.getInvocation().getSemanticsContext(), defKinds,
+      ci.getInvocation().getSemanticsContext().intrinsics(),
+      ci.getInvocation().getSemanticsContext().targetCharacteristics(),
       ci.getParsing().allCooked(), ci.getInvocation().getTargetOpts().triple,
-      kindMap);
+      kindMap, ci.getInvocation().getLoweringOpts(),
+      ci.getInvocation().getFrontendOpts().envDefaults);
+
+  // Fetch module from lb, so we can set
+  mlirModule = std::make_unique<mlir::ModuleOp>(lb.getModule());
+  setUpTargetMachine();
+  const llvm::DataLayout &dl = tm->createDataLayout();
+  setMLIRDataLayout(*mlirModule, dl);
 
   // Create a parse tree and lower it to FIR
   Fortran::parser::Program &parseTree{*ci.getParsing().parseTree()};
   lb.lower(parseTree, ci.getInvocation().getSemanticsContext());
-  mlirModule = std::make_unique<mlir::ModuleOp>(lb.getModule());
 
   // run the default passes.
-  mlir::PassManager pm(mlirCtx.get(), mlir::OpPassManager::Nesting::Implicit);
+  mlir::PassManager pm((*mlirModule)->getName(),
+                       mlir::OpPassManager::Nesting::Implicit);
   pm.enableVerifier(/*verifyPasses=*/true);
   pm.addPass(std::make_unique<Fortran::lower::VerifierPass>());
 
@@ -423,8 +456,8 @@ void GetDefinitionAction::executeAction() {
       clang::DiagnosticsEngine::Error, "Symbol not found");
 
   auto gdv = ci.getInvocation().getFrontendOpts().getDefVals;
-  auto charBlock{cs.GetCharBlockFromLineAndColumns(
-      gdv.line, gdv.startColumn, gdv.endColumn)};
+  auto charBlock{cs.GetCharBlockFromLineAndColumns(gdv.line, gdv.startColumn,
+                                                   gdv.endColumn)};
   if (!charBlock) {
     ci.getDiagnostics().Report(diagID);
     return;
@@ -477,23 +510,43 @@ CodeGenAction::~CodeGenAction() = default;
 
 #include "flang/Tools/CLOptions.inc"
 
+static llvm::OptimizationLevel
+mapToLevel(const Fortran::frontend::CodeGenOptions &opts) {
+  switch (opts.OptimizationLevel) {
+  default:
+    llvm_unreachable("Invalid optimization level!");
+  case 0:
+    return llvm::OptimizationLevel::O0;
+  case 1:
+    return llvm::OptimizationLevel::O1;
+  case 2:
+    return llvm::OptimizationLevel::O2;
+  case 3:
+    return llvm::OptimizationLevel::O3;
+  }
+}
+
 // Lower the previously generated MLIR module into an LLVM IR module
 void CodeGenAction::generateLLVMIR() {
   assert(mlirModule && "The MLIR module has not been generated yet.");
 
   CompilerInstance &ci = this->getInstance();
+  auto opts = ci.getInvocation().getCodeGenOpts();
+  llvm::OptimizationLevel level = mapToLevel(opts);
 
   fir::support::loadDialects(*mlirCtx);
   fir::support::registerLLVMTranslation(*mlirCtx);
 
   // Set-up the MLIR pass manager
-  mlir::PassManager pm(mlirCtx.get(), mlir::OpPassManager::Nesting::Implicit);
+  mlir::PassManager pm((*mlirModule)->getName(),
+                       mlir::OpPassManager::Nesting::Implicit);
 
   pm.addPass(std::make_unique<Fortran::lower::VerifierPass>());
   pm.enableVerifier(/*verifyPasses=*/true);
 
   // Create the pass pipeline
-  fir::createMLIRToLLVMPassPipeline(pm);
+  fir::createMLIRToLLVMPassPipeline(pm, level, opts.StackArrays,
+                                    opts.Underscoring);
   mlir::applyPassManagerCLOptions(pm);
 
   // run the pass manager
@@ -504,7 +557,7 @@ void CodeGenAction::generateLLVMIR() {
   }
 
   // Translate to LLVM IR
-  llvm::Optional<llvm::StringRef> moduleName = mlirModule->getName();
+  std::optional<llvm::StringRef> moduleName = mlirModule->getName();
   llvmModule = mlir::translateModuleToLLVMIR(
       *mlirModule, *llvmCtx, moduleName ? *moduleName : "FIRModule");
 
@@ -514,18 +567,22 @@ void CodeGenAction::generateLLVMIR() {
     ci.getDiagnostics().Report(diagID);
     return;
   }
+
+  // Set PIC/PIE level LLVM module flags.
+  if (opts.PICLevel > 0) {
+    llvmModule->setPICLevel(static_cast<llvm::PICLevel::Level>(opts.PICLevel));
+    if (opts.IsPIE)
+      llvmModule->setPIELevel(
+          static_cast<llvm::PIELevel::Level>(opts.PICLevel));
+  }
+
 }
 
 void CodeGenAction::setUpTargetMachine() {
   CompilerInstance &ci = this->getInstance();
 
-  // Set the triple based on the CompilerInvocation set-up
-  const std::string &theTriple = ci.getInvocation().getTargetOpts().triple;
-  if (llvmModule->getTargetTriple() != theTriple) {
-    ci.getDiagnostics().Report(clang::diag::warn_fe_override_module)
-        << theTriple;
-    llvmModule->setTargetTriple(theTriple);
-  }
+  const TargetOptions &targetOpts = ci.getInvocation().getTargetOpts();
+  const std::string &theTriple = targetOpts.triple;
 
   // Create `Target`
   std::string error;
@@ -534,11 +591,19 @@ void CodeGenAction::setUpTargetMachine() {
   assert(theTarget && "Failed to create Target");
 
   // Create `TargetMachine`
-  tm.reset(theTarget->createTargetMachine(theTriple, /*CPU=*/"",
-                                          /*Features=*/"",
-                                          llvm::TargetOptions(), llvm::None));
+  const auto &CGOpts = ci.getInvocation().getCodeGenOpts();
+  std::optional<llvm::CodeGenOpt::Level> OptLevelOrNone =
+      llvm::CodeGenOpt::getLevel(CGOpts.OptimizationLevel);
+  assert(OptLevelOrNone && "Invalid optimization level!");
+  llvm::CodeGenOpt::Level OptLevel = *OptLevelOrNone;
+  std::string featuresStr = llvm::join(targetOpts.featuresAsWritten.begin(),
+                                       targetOpts.featuresAsWritten.end(), ",");
+  tm.reset(theTarget->createTargetMachine(
+      theTriple, /*CPU=*/targetOpts.cpu,
+      /*Features=*/featuresStr, llvm::TargetOptions(),
+      /*Reloc::Model=*/CGOpts.getRelocationModel(),
+      /*CodeModel::Model=*/std::nullopt, OptLevel));
   assert(tm && "Failed to create TargetMachine");
-  llvmModule->setDataLayout(tm->createDataLayout());
 }
 
 static std::unique_ptr<llvm::raw_pwrite_stream>
@@ -610,23 +675,79 @@ static void generateMachineCodeOrAssemblyImpl(clang::DiagnosticsEngine &diags,
   codeGenPasses.run(llvmModule);
 }
 
-/// Generate LLVM byte code file from the input LLVM module.
-///
-/// \param [in] tm Target machine to aid the code-gen pipeline set-up
-/// \param [in] llvmModule LLVM module to lower to assembly/machine-code
-/// \param [out] os Output stream to emit the generated code to
-static void generateLLVMBCImpl(llvm::TargetMachine &tm,
-                               llvm::Module &llvmModule,
-                               llvm::raw_pwrite_stream &os) {
-  // Set-up the pass manager
-  llvm::ModulePassManager mpm;
-  llvm::ModuleAnalysisManager mam;
-  llvm::PassBuilder pb(&tm);
-  pb.registerModuleAnalyses(mam);
-  mpm.addPass(llvm::BitcodeWriterPass(os));
+void CodeGenAction::runOptimizationPipeline(llvm::raw_pwrite_stream &os) {
+  auto opts = getInstance().getInvocation().getCodeGenOpts();
+  auto &diags = getInstance().getDiagnostics();
+  llvm::OptimizationLevel level = mapToLevel(opts);
 
-  // run the passes
-  mpm.run(llvmModule, mam);
+  // Create the analysis managers.
+  llvm::LoopAnalysisManager lam;
+  llvm::FunctionAnalysisManager fam;
+  llvm::CGSCCAnalysisManager cgam;
+  llvm::ModuleAnalysisManager mam;
+
+  // Create the pass manager builder.
+  llvm::PassInstrumentationCallbacks pic;
+  llvm::PipelineTuningOptions pto;
+  std::optional<llvm::PGOOptions> pgoOpt;
+  llvm::StandardInstrumentations si(llvmModule->getContext(),
+                                    opts.DebugPassManager);
+  si.registerCallbacks(pic, &fam);
+  llvm::PassBuilder pb(tm.get(), pto, pgoOpt, &pic);
+
+  // Attempt to load pass plugins and register their callbacks with PB.
+  for (auto &pluginFile : opts.LLVMPassPlugins) {
+    auto passPlugin = llvm::PassPlugin::Load(pluginFile);
+    if (passPlugin) {
+      passPlugin->registerPassBuilderCallbacks(pb);
+    } else {
+      diags.Report(clang::diag::err_fe_unable_to_load_plugin)
+          << pluginFile << passPlugin.takeError();
+    }
+  }
+  // Register static plugin extensions.
+#define HANDLE_EXTENSION(Ext)                                                  \
+  get##Ext##PluginInfo().RegisterPassBuilderCallbacks(pb);
+#include "llvm/Support/Extension.def"
+
+  // Register all the basic analyses with the managers.
+  pb.registerModuleAnalyses(mam);
+  pb.registerCGSCCAnalyses(cgam);
+  pb.registerFunctionAnalyses(fam);
+  pb.registerLoopAnalyses(lam);
+  pb.crossRegisterProxies(lam, fam, cgam, mam);
+
+  // Create the pass manager.
+  llvm::ModulePassManager mpm;
+  if (opts.OptimizationLevel == 0)
+    mpm = pb.buildO0DefaultPipeline(level, false);
+  else
+    mpm = pb.buildPerModuleDefaultPipeline(level);
+
+  if (action == BackendActionTy::Backend_EmitBC)
+    mpm.addPass(llvm::BitcodeWriterPass(os));
+
+  // Run the passes.
+  mpm.run(*llvmModule, mam);
+}
+
+void CodeGenAction::embedOffloadObjects() {
+  CompilerInstance &ci = this->getInstance();
+  const auto &cgOpts = ci.getInvocation().getCodeGenOpts();
+
+  for (llvm::StringRef offloadObject : cgOpts.OffloadObjects) {
+    llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> objectOrErr =
+        llvm::MemoryBuffer::getFileOrSTDIN(offloadObject);
+    if (std::error_code ec = objectOrErr.getError()) {
+      auto diagID = ci.getDiagnostics().getCustomDiagID(
+          clang::DiagnosticsEngine::Error, "could not open '%0' for embedding");
+      ci.getDiagnostics().Report(diagID) << offloadObject;
+      return;
+    }
+    llvm::embedBufferInModule(
+        *llvmModule, **objectOrErr, ".llvm.offloading",
+        llvm::Align(llvm::object::OffloadBinary::getAlignment()));
+  }
 }
 
 void CodeGenAction::executeAction() {
@@ -661,10 +782,34 @@ void CodeGenAction::executeAction() {
     return;
   }
 
-  // generate an LLVM module if it's not already present (it will already be
+  // Generate an LLVM module if it's not already present (it will already be
   // present if the input file is an LLVM IR/BC file).
   if (!llvmModule)
     generateLLVMIR();
+
+  // Set the triple based on the targetmachine (this comes compiler invocation
+  // and the command-line target option if specified, or the default if not
+  // given on the command-line).
+  setUpTargetMachine();
+  const std::string &theTriple = tm->getTargetTriple().str();
+
+  if (llvmModule->getTargetTriple() != theTriple) {
+    ci.getDiagnostics().Report(clang::diag::warn_fe_override_module)
+        << theTriple;
+  }
+
+  // Always set the triple and data layout, to make sure they match and are set.
+  // Note that this overwrites any datalayout stored in the LLVM-IR. This avoids
+  // an assert for incompatible data layout when the code-generation happens.
+  llvmModule->setTargetTriple(theTriple);
+  llvmModule->setDataLayout(tm->createDataLayout());
+
+  // Embed offload objects specified with -fembed-offload-object
+  if (!ci.getInvocation().getCodeGenOpts().OffloadObjects.empty())
+    embedOffloadObjects();
+
+  // Run LLVM's middle-end (i.e. the optimizer).
+  runOptimizationPipeline(ci.isOutputStreamNull() ? *os : ci.getOutputStream());
 
   if (action == BackendActionTy::Backend_EmitLL) {
     llvmModule->print(ci.isOutputStreamNull() ? *os : ci.getOutputStream(),
@@ -672,12 +817,12 @@ void CodeGenAction::executeAction() {
     return;
   }
 
-  setUpTargetMachine();
   if (action == BackendActionTy::Backend_EmitBC) {
-    generateLLVMBCImpl(*tm, *llvmModule, *os);
+    // This action has effectively been completed in runOptimizationPipeline.
     return;
   }
 
+  // Run LLVM's backend and generate either assembly or machine code
   if (action == BackendActionTy::Backend_EmitAssembly ||
       action == BackendActionTy::Backend_EmitObj) {
     generateMachineCodeOrAssemblyImpl(

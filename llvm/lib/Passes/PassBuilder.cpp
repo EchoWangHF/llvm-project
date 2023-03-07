@@ -23,8 +23,7 @@
 #include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/CFGPrinter.h"
-#include "llvm/Analysis/CFLAndersAliasAnalysis.h"
-#include "llvm/Analysis/CFLSteensAliasAnalysis.h"
+#include "llvm/Analysis/CFGSCCPrinter.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/CallPrinter.h"
@@ -47,6 +46,7 @@
 #include "llvm/Analysis/InstCount.h"
 #include "llvm/Analysis/LazyCallGraph.h"
 #include "llvm/Analysis/LazyValueInfo.h"
+#include "llvm/Analysis/LegacyDivergenceAnalysis.h"
 #include "llvm/Analysis/Lint.h"
 #include "llvm/Analysis/LoopAccessAnalysis.h"
 #include "llvm/Analysis/LoopCacheAnalysis.h"
@@ -72,12 +72,16 @@
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/TypeBasedAliasAnalysis.h"
+#include "llvm/Analysis/UniformityAnalysis.h"
+#include "llvm/CodeGen/HardwareLoops.h"
+#include "llvm/CodeGen/TypePromotion.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Dominators.h"
-#include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/PrintPasses.h"
 #include "llvm/IR/SafepointIRVerifier.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/IRPrinter/IRPrintingPasses.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -86,6 +90,7 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/AggressiveInstCombine/AggressiveInstCombine.h"
 #include "llvm/Transforms/Coroutines/CoroCleanup.h"
+#include "llvm/Transforms/Coroutines/CoroConditionalWrapper.h"
 #include "llvm/Transforms/Coroutines/CoroEarly.h"
 #include "llvm/Transforms/Coroutines/CoroElide.h"
 #include "llvm/Transforms/Coroutines/CoroSplit.h"
@@ -134,10 +139,12 @@
 #include "llvm/Transforms/Instrumentation/HWAddressSanitizer.h"
 #include "llvm/Transforms/Instrumentation/InstrOrderFile.h"
 #include "llvm/Transforms/Instrumentation/InstrProfiling.h"
+#include "llvm/Transforms/Instrumentation/KCFI.h"
 #include "llvm/Transforms/Instrumentation/MemProfiler.h"
 #include "llvm/Transforms/Instrumentation/MemorySanitizer.h"
 #include "llvm/Transforms/Instrumentation/PGOInstrumentation.h"
 #include "llvm/Transforms/Instrumentation/PoisonChecking.h"
+#include "llvm/Transforms/Instrumentation/SanitizerBinaryMetadata.h"
 #include "llvm/Transforms/Instrumentation/SanitizerCoverage.h"
 #include "llvm/Transforms/Instrumentation/ThreadSanitizer.h"
 #include "llvm/Transforms/ObjCARC.h"
@@ -199,6 +206,7 @@
 #include "llvm/Transforms/Scalar/NaryReassociate.h"
 #include "llvm/Transforms/Scalar/NewGVN.h"
 #include "llvm/Transforms/Scalar/PartiallyInlineLibCalls.h"
+#include "llvm/Transforms/Scalar/PlaceSafepoints.h"
 #include "llvm/Transforms/Scalar/Reassociate.h"
 #include "llvm/Transforms/Scalar/Reg2Mem.h"
 #include "llvm/Transforms/Scalar/RewriteStatepointsForGC.h"
@@ -221,6 +229,7 @@
 #include "llvm/Transforms/Utils/BreakCriticalEdges.h"
 #include "llvm/Transforms/Utils/CanonicalizeAliases.h"
 #include "llvm/Transforms/Utils/CanonicalizeFreezeInLoops.h"
+#include "llvm/Transforms/Utils/CountVisits.h"
 #include "llvm/Transforms/Utils/Debugify.h"
 #include "llvm/Transforms/Utils/EntryExitInstrumenter.h"
 #include "llvm/Transforms/Utils/FixIrreducible.h"
@@ -233,6 +242,7 @@
 #include "llvm/Transforms/Utils/LoopSimplify.h"
 #include "llvm/Transforms/Utils/LoopVersioning.h"
 #include "llvm/Transforms/Utils/LowerGlobalDtors.h"
+#include "llvm/Transforms/Utils/LowerIFunc.h"
 #include "llvm/Transforms/Utils/LowerInvoke.h"
 #include "llvm/Transforms/Utils/LowerSwitch.h"
 #include "llvm/Transforms/Utils/Mem2Reg.h"
@@ -249,6 +259,7 @@
 #include "llvm/Transforms/Vectorize/LoopVectorize.h"
 #include "llvm/Transforms/Vectorize/SLPVectorizer.h"
 #include "llvm/Transforms/Vectorize/VectorCombine.h"
+#include <optional>
 
 using namespace llvm;
 
@@ -373,7 +384,7 @@ AnalysisKey NoOpLoopAnalysis::Key;
 /// We currently only use this for --print-before/after.
 bool shouldPopulateClassToPassNames() {
   return PrintPipelinePasses || !printBeforePasses().empty() ||
-         !printAfterPasses().empty();
+         !printAfterPasses().empty() || !isFilterPassesEmpty();
 }
 
 // A pass for testing -print-on-crash.
@@ -390,7 +401,7 @@ public:
 } // namespace
 
 PassBuilder::PassBuilder(TargetMachine *TM, PipelineTuningOptions PTO,
-                         Optional<PGOOptions> PGOOpt,
+                         std::optional<PGOOptions> PGOOpt,
                          PassInstrumentationCallbacks *PIC)
     : TM(TM), PTO(PTO), PGOOpt(PGOOpt), PIC(PIC) {
   if (TM)
@@ -467,21 +478,21 @@ void PassBuilder::registerLoopAnalyses(LoopAnalysisManager &LAM) {
     C(LAM);
 }
 
-static Optional<int> parseRepeatPassName(StringRef Name) {
+static std::optional<int> parseRepeatPassName(StringRef Name) {
   if (!Name.consume_front("repeat<") || !Name.consume_back(">"))
-    return None;
+    return std::nullopt;
   int Count;
   if (Name.getAsInteger(0, Count) || Count <= 0)
-    return None;
+    return std::nullopt;
   return Count;
 }
 
-static Optional<int> parseDevirtPassName(StringRef Name) {
+static std::optional<int> parseDevirtPassName(StringRef Name) {
   if (!Name.consume_front("devirt<") || !Name.consume_back(">"))
-    return None;
+    return std::nullopt;
   int Count;
   if (Name.getAsInteger(0, Count) || Count < 0)
-    return None;
+    return std::nullopt;
   return Count;
 }
 
@@ -530,6 +541,48 @@ auto parsePassParameters(ParametersParseCallableT &&Parser, StringRef Name,
   assert((Result || Result.template errorIsA<StringError>()) &&
          "Pass parameter parser can only return StringErrors.");
   return Result;
+}
+
+/// Parser of parameters for HardwareLoops  pass.
+Expected<HardwareLoopOptions> parseHardwareLoopOptions(StringRef Params) {
+  HardwareLoopOptions HardwareLoopOpts;
+
+  while (!Params.empty()) {
+    StringRef ParamName;
+    std::tie(ParamName, Params) = Params.split(';');
+    if (ParamName.consume_front("hardware-loop-decrement=")) {
+      int Count;
+      if (ParamName.getAsInteger(0, Count))
+        return make_error<StringError>(
+            formatv("invalid HardwareLoopPass parameter '{0}' ", ParamName).str(),
+            inconvertibleErrorCode());
+      HardwareLoopOpts.setDecrement(Count);
+      continue;
+    }
+    if (ParamName.consume_front("hardware-loop-counter-bitwidth=")) {
+      int Count;
+      if (ParamName.getAsInteger(0, Count))
+        return make_error<StringError>(
+            formatv("invalid HardwareLoopPass parameter '{0}' ", ParamName).str(),
+            inconvertibleErrorCode());
+      HardwareLoopOpts.setCounterBitwidth(Count);
+      continue;
+    }
+    if (ParamName == "force-hardware-loops") {
+      HardwareLoopOpts.setForce(true);
+    } else if (ParamName == "force-hardware-loop-phi") {
+      HardwareLoopOpts.setForcePhi(true);
+    } else if (ParamName == "force-nested-hardware-loop") {
+      HardwareLoopOpts.setForceNested(true);
+    } else if (ParamName == "force-hardware-loop-guard") {
+      HardwareLoopOpts.setForceGuard(true);
+    } else {
+      return make_error<StringError>(
+          formatv("invalid HardwarePass parameter '{0}' ", ParamName).str(),
+          inconvertibleErrorCode());
+    }
+  }
+  return HardwareLoopOpts;
 }
 
 /// Parser of parameters for LoopUnroll pass.
@@ -603,6 +656,11 @@ Expected<bool> parseInlinerPassOptions(StringRef Params) {
 
 Expected<bool> parseCoroSplitPassOptions(StringRef Params) {
   return parseSinglePassOption(Params, "reuse-storage", "CoroSplitPass");
+}
+
+Expected<bool> parsePostOrderFunctionAttrsPassOptions(StringRef Params) {
+  return parseSinglePassOption(Params, "skip-non-recursive",
+                               "PostOrderFunctionAttrs");
 }
 
 Expected<bool> parseEarlyCSEPassOptions(StringRef Params) {
@@ -727,6 +785,33 @@ Expected<SimplifyCFGOptions> parseSimplifyCFGOptions(StringRef Params) {
   return Result;
 }
 
+Expected<InstCombineOptions> parseInstCombineOptions(StringRef Params) {
+  InstCombineOptions Result;
+  while (!Params.empty()) {
+    StringRef ParamName;
+    std::tie(ParamName, Params) = Params.split(';');
+
+    bool Enable = !ParamName.consume_front("no-");
+    if (ParamName == "use-loop-info") {
+      Result.setUseLoopInfo(Enable);
+    } else if (Enable && ParamName.consume_front("max-iterations=")) {
+      APInt MaxIterations;
+      if (ParamName.getAsInteger(0, MaxIterations))
+        return make_error<StringError>(
+            formatv("invalid argument to InstCombine pass max-iterations "
+                    "parameter: '{0}' ",
+                    ParamName).str(),
+            inconvertibleErrorCode());
+      Result.setMaxIterations((unsigned)MaxIterations.getZExtValue());
+    } else {
+      return make_error<StringError>(
+          formatv("invalid InstCombine pass parameter '{0}' ", ParamName).str(),
+          inconvertibleErrorCode());
+    }
+  }
+  return Result;
+}
+
 /// Parser of parameters for LoopVectorize pass.
 Expected<LoopVectorizeOptions> parseLoopVectorizeOptions(StringRef Params) {
   LoopVectorizeOptions Opts;
@@ -831,6 +916,36 @@ Expected<GVNOptions> parseGVNOptions(StringRef Params) {
   return Result;
 }
 
+Expected<IPSCCPOptions> parseIPSCCPOptions(StringRef Params) {
+  IPSCCPOptions Result;
+  while (!Params.empty()) {
+    StringRef ParamName;
+    std::tie(ParamName, Params) = Params.split(';');
+
+    bool Enable = !ParamName.consume_front("no-");
+    if (ParamName == "func-spec")
+      Result.setFuncSpec(Enable);
+    else
+      return make_error<StringError>(
+          formatv("invalid IPSCCP pass parameter '{0}' ", ParamName).str(),
+          inconvertibleErrorCode());
+  }
+  return Result;
+}
+
+Expected<SROAOptions> parseSROAOptions(StringRef Params) {
+  if (Params.empty() || Params == "modify-cfg")
+    return SROAOptions::ModifyCFG;
+  if (Params == "preserve-cfg")
+    return SROAOptions::PreserveCFG;
+  return make_error<StringError>(
+      formatv("invalid SROA pass parameter '{0}' (either preserve-cfg or "
+              "modify-cfg can be specified)",
+              Params)
+          .str(),
+      inconvertibleErrorCode());
+}
+
 Expected<StackLifetime::LivenessType>
 parseStackLifetimeOptions(StringRef Params) {
   StackLifetime::LivenessType Result = StackLifetime::LivenessType::May;
@@ -849,6 +964,16 @@ parseStackLifetimeOptions(StringRef Params) {
     }
   }
   return Result;
+}
+
+Expected<bool> parseDependenceAnalysisPrinterOptions(StringRef Params) {
+  return parseSinglePassOption(Params, "normalized-results",
+                               "DependenceAnalysisPrinter");
+}
+
+Expected<bool> parseSeparateConstOffsetFromGEPPassOptions(StringRef Params) {
+  return parseSinglePassOption(Params, "lower-gep",
+                               "SeparateConstOffsetFromGEP");
 }
 
 } // namespace
@@ -891,6 +1016,8 @@ static bool isModulePassName(StringRef Name, CallbacksT &Callbacks) {
   if (Name == "cgscc")
     return true;
   if (Name == "function" || Name == "function<eager-inv>")
+    return true;
+  if (Name == "coro-cond")
     return true;
 
   // Explicitly handle custom-parsed pass names.
@@ -974,7 +1101,7 @@ static bool isLoopNestPassName(StringRef Name, CallbacksT &Callbacks,
   if (parseRepeatPassName(Name))
     return true;
 
-  if (Name == "lnicm") {
+  if (checkParametrizedPassName(Name, "lnicm")) {
     UseMemorySSA = true;
     return true;
   }
@@ -996,7 +1123,7 @@ static bool isLoopPassName(StringRef Name, CallbacksT &Callbacks,
   if (parseRepeatPassName(Name))
     return true;
 
-  if (Name == "licm") {
+  if (checkParametrizedPassName(Name, "licm")) {
     UseMemorySSA = true;
     return true;
   }
@@ -1015,7 +1142,7 @@ static bool isLoopPassName(StringRef Name, CallbacksT &Callbacks,
   return callbacksAcceptPassName<LoopPassManager>(Name, Callbacks);
 }
 
-Optional<std::vector<PassBuilder::PipelineElement>>
+std::optional<std::vector<PassBuilder::PipelineElement>>
 PassBuilder::parsePipelineText(StringRef Text) {
   std::vector<PipelineElement> ResultPipeline;
 
@@ -1048,7 +1175,7 @@ PassBuilder::parsePipelineText(StringRef Text) {
     do {
       // If we try to pop the outer pipeline we have unbalanced parentheses.
       if (PipelineStack.size() == 1)
-        return None;
+        return std::nullopt;
 
       PipelineStack.pop_back();
     } while (Text.consume_front(")"));
@@ -1060,12 +1187,12 @@ PassBuilder::parsePipelineText(StringRef Text) {
     // Otherwise, the end of an inner pipeline always has to be followed by
     // a comma, and then we can continue.
     if (!Text.consume_front(","))
-      return None;
+      return std::nullopt;
   }
 
   if (PipelineStack.size() > 1)
     // Unbalanced paretheses.
-    return None;
+    return std::nullopt;
 
   assert(PipelineStack.back() == &ResultPipeline &&
          "Wrong pipeline at the bottom of the stack!");
@@ -1084,6 +1211,13 @@ Error PassBuilder::parseModulePass(ModulePassManager &MPM,
       if (auto Err = parseModulePassPipeline(NestedMPM, InnerPipeline))
         return Err;
       MPM.addPass(std::move(NestedMPM));
+      return Error::success();
+    }
+    if (Name == "coro-cond") {
+      ModulePassManager NestedMPM;
+      if (auto Err = parseModulePassPipeline(NestedMPM, InnerPipeline))
+        return Err;
+      MPM.addPass(CoroConditionalWrapper(std::move(NestedMPM)));
       return Error::success();
     }
     if (Name == "cgscc") {
@@ -1185,12 +1319,12 @@ Error PassBuilder::parseModulePass(ModulePassManager &MPM,
   if (Name == "require<" NAME ">") {                                           \
     MPM.addPass(                                                               \
         RequireAnalysisPass<                                                   \
-            std::remove_reference<decltype(CREATE_PASS)>::type, Module>());    \
+            std::remove_reference_t<decltype(CREATE_PASS)>, Module>());        \
     return Error::success();                                                   \
   }                                                                            \
   if (Name == "invalidate<" NAME ">") {                                        \
     MPM.addPass(InvalidateAnalysisPass<                                        \
-                std::remove_reference<decltype(CREATE_PASS)>::type>());        \
+                std::remove_reference_t<decltype(CREATE_PASS)>>());            \
     return Error::success();                                                   \
   }
 #define CGSCC_PASS(NAME, CREATE_PASS)                                          \
@@ -1319,14 +1453,14 @@ Error PassBuilder::parseCGSCCPass(CGSCCPassManager &CGPM,
 #define CGSCC_ANALYSIS(NAME, CREATE_PASS)                                      \
   if (Name == "require<" NAME ">") {                                           \
     CGPM.addPass(RequireAnalysisPass<                                          \
-                 std::remove_reference<decltype(CREATE_PASS)>::type,           \
+                 std::remove_reference_t<decltype(CREATE_PASS)>,               \
                  LazyCallGraph::SCC, CGSCCAnalysisManager, LazyCallGraph &,    \
                  CGSCCUpdateResult &>());                                      \
     return Error::success();                                                   \
   }                                                                            \
   if (Name == "invalidate<" NAME ">") {                                        \
     CGPM.addPass(InvalidateAnalysisPass<                                       \
-                 std::remove_reference<decltype(CREATE_PASS)>::type>());       \
+                 std::remove_reference_t<decltype(CREATE_PASS)>>());           \
     return Error::success();                                                   \
   }
 #define FUNCTION_PASS(NAME, CREATE_PASS)                                       \
@@ -1395,8 +1529,9 @@ Error PassBuilder::parseFunctionPass(FunctionPassManager &FPM,
         return Err;
       // Add the nested pass manager with the appropriate adaptor.
       bool UseMemorySSA = (Name == "loop-mssa");
-      bool UseBFI = llvm::any_of(
-          InnerPipeline, [](auto Pipeline) { return Pipeline.Name == "licm"; });
+      bool UseBFI = llvm::any_of(InnerPipeline, [](auto Pipeline) {
+        return Pipeline.Name.contains("simple-loop-unswitch");
+      });
       bool UseBPI = llvm::any_of(InnerPipeline, [](auto Pipeline) {
         return Pipeline.Name == "loop-predication";
       });
@@ -1440,12 +1575,12 @@ Error PassBuilder::parseFunctionPass(FunctionPassManager &FPM,
   if (Name == "require<" NAME ">") {                                           \
     FPM.addPass(                                                               \
         RequireAnalysisPass<                                                   \
-            std::remove_reference<decltype(CREATE_PASS)>::type, Function>());  \
+            std::remove_reference_t<decltype(CREATE_PASS)>, Function>());      \
     return Error::success();                                                   \
   }                                                                            \
   if (Name == "invalidate<" NAME ">") {                                        \
     FPM.addPass(InvalidateAnalysisPass<                                        \
-                std::remove_reference<decltype(CREATE_PASS)>::type>());        \
+                std::remove_reference_t<decltype(CREATE_PASS)>>());            \
     return Error::success();                                                   \
   }
 // FIXME: UseMemorySSA is set to false. Maybe we could do things like:
@@ -1536,14 +1671,14 @@ Error PassBuilder::parseLoopPass(LoopPassManager &LPM,
 #define LOOP_ANALYSIS(NAME, CREATE_PASS)                                       \
   if (Name == "require<" NAME ">") {                                           \
     LPM.addPass(RequireAnalysisPass<                                           \
-                std::remove_reference<decltype(CREATE_PASS)>::type, Loop,      \
+                std::remove_reference_t<decltype(CREATE_PASS)>, Loop,          \
                 LoopAnalysisManager, LoopStandardAnalysisResults &,            \
                 LPMUpdater &>());                                              \
     return Error::success();                                                   \
   }                                                                            \
   if (Name == "invalidate<" NAME ">") {                                        \
     LPM.addPass(InvalidateAnalysisPass<                                        \
-                std::remove_reference<decltype(CREATE_PASS)>::type>());        \
+                std::remove_reference_t<decltype(CREATE_PASS)>>());            \
     return Error::success();                                                   \
   }
 #include "PassRegistry.def"
@@ -1559,13 +1694,13 @@ bool PassBuilder::parseAAPassName(AAManager &AA, StringRef Name) {
 #define MODULE_ALIAS_ANALYSIS(NAME, CREATE_PASS)                               \
   if (Name == NAME) {                                                          \
     AA.registerModuleAnalysis<                                                 \
-        std::remove_reference<decltype(CREATE_PASS)>::type>();                 \
+        std::remove_reference_t<decltype(CREATE_PASS)>>();                     \
     return true;                                                               \
   }
 #define FUNCTION_ALIAS_ANALYSIS(NAME, CREATE_PASS)                             \
   if (Name == NAME) {                                                          \
     AA.registerFunctionAnalysis<                                               \
-        std::remove_reference<decltype(CREATE_PASS)>::type>();                 \
+        std::remove_reference_t<decltype(CREATE_PASS)>>();                     \
     return true;                                                               \
   }
 #include "PassRegistry.def"
@@ -1753,40 +1888,6 @@ Error PassBuilder::parseAAPipeline(AAManager &AA, StringRef PipelineText) {
   }
 
   return Error::success();
-}
-
-bool PassBuilder::isAAPassName(StringRef PassName) {
-#define MODULE_ALIAS_ANALYSIS(NAME, CREATE_PASS)                               \
-  if (PassName == NAME)                                                        \
-    return true;
-#define FUNCTION_ALIAS_ANALYSIS(NAME, CREATE_PASS)                             \
-  if (PassName == NAME)                                                        \
-    return true;
-#include "PassRegistry.def"
-  return false;
-}
-
-bool PassBuilder::isAnalysisPassName(StringRef PassName) {
-#define MODULE_ANALYSIS(NAME, CREATE_PASS)                                     \
-  if (PassName == NAME)                                                        \
-    return true;
-#define FUNCTION_ANALYSIS(NAME, CREATE_PASS)                                   \
-  if (PassName == NAME)                                                        \
-    return true;
-#define LOOP_ANALYSIS(NAME, CREATE_PASS)                                       \
-  if (PassName == NAME)                                                        \
-    return true;
-#define CGSCC_ANALYSIS(NAME, CREATE_PASS)                                      \
-  if (PassName == NAME)                                                        \
-    return true;
-#define MODULE_ALIAS_ANALYSIS(NAME, CREATE_PASS)                               \
-  if (PassName == NAME)                                                        \
-    return true;
-#define FUNCTION_ALIAS_ANALYSIS(NAME, CREATE_PASS)                             \
-  if (PassName == NAME)                                                        \
-    return true;
-#include "PassRegistry.def"
-  return false;
 }
 
 static void printPassName(StringRef PassName, raw_ostream &OS) {

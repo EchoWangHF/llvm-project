@@ -90,7 +90,11 @@ static void ReportGlobal(const Global &g, const char *prefix) {
   DataInfo info;
   Symbolizer::GetOrInit()->SymbolizeData(g.beg, &info);
   if (info.line != 0) {
-    Report("  location: name=%s, %d\n", info.file, info.line);
+    Report("  location: name=%s, %d\n", info.file, static_cast<int>(info.line));
+  }
+  else if (g.gcc_location != 0) {
+    // Fallback to Global::gcc_location
+    Report("  location: name=%s, %d\n", g.gcc_location->filename, g.gcc_location->line_no);
   }
 }
 
@@ -301,7 +305,12 @@ void PrintGlobalLocation(InternalScopedString *str, const __asan_global &g) {
   Symbolizer::GetOrInit()->SymbolizeData(g.beg, &info);
 
   if (info.line != 0) {
-    str->append("%s:%d", info.file, info.line);
+    str->append("%s:%d", info.file, static_cast<int>(info.line));
+  } else if (g.gcc_location != 0) {
+    // Fallback to Global::gcc_location
+    str->append("%s", g.gcc_location->filename ? g.gcc_location->filename : g.module_name);
+    if (g.gcc_location->line_no) str->append(":%d", g.gcc_location->line_no);
+    if (g.gcc_location->column_no) str->append(":%d", g.gcc_location->column_no);
   } else {
     str->append("%s", g.module_name);
   }

@@ -20,9 +20,13 @@ class TestQueue(TestBase):
 
         self.runCmd("settings set target.import-std-module true")
 
-        queue_type = "std::queue<C>"
-        size_type = queue_type + "::size_type"
-        value_type = "std::__deque_base<C, std::allocator<C> >::value_type"
+        if self.expectedCompiler(["clang"]) and self.expectedCompilerVersion(['>', '16.0']):
+            queue_type = "std::queue<C>"
+        else:
+            queue_type = "std::queue<C, std::deque<C, std::allocator<C> > >"
+
+        size_type = "size_type"
+        value_type = "value_type"
 
         # Test std::queue functionality with a std::deque.
         self.expect_expr(
@@ -52,9 +56,11 @@ class TestQueue(TestBase):
                          result_value="5")
 
         # Test std::queue functionality with a std::list.
-        queue_type = "std::queue<C, std::list<C> >"
-        size_type = queue_type + "::size_type"
-        value_type = "std::list<C>::value_type"
+        if self.expectedCompiler(["clang"]) and self.expectedCompilerVersion(['>', '16.0']):
+            queue_type = "std::queue<C, std::list<C> >"
+        else:
+            queue_type = "std::queue<C, std::list<C, std::allocator<C> > >"
+
         self.expect_expr(
             "q_list",
             result_type=queue_type,

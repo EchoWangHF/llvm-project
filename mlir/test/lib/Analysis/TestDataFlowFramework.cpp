@@ -9,6 +9,7 @@
 #include "mlir/Analysis/DataFlowFramework.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/Pass.h"
+#include <optional>
 
 using namespace mlir;
 
@@ -20,11 +21,8 @@ public:
 
   using AnalysisState::AnalysisState;
 
-  /// Default-initialize the state to zero.
-  ChangeResult defaultInitialize() override { return join(0); }
-
   /// Returns true if the state is uninitialized.
-  bool isUninitialized() const override { return !state; }
+  bool isUninitialized() const { return !state; }
 
   /// Print the integer value or "none" if uninitialized.
   void print(raw_ostream &os) const override {
@@ -64,7 +62,7 @@ public:
 
 private:
   /// An optional integer value.
-  Optional<uint64_t> state;
+  std::optional<uint64_t> state;
 };
 
 /// This analysis computes `FooState` across operations and control-flow edges.
@@ -97,6 +95,9 @@ struct TestFooAnalysisPass
 LogicalResult FooAnalysis::initialize(Operation *top) {
   if (top->getNumRegions() != 1)
     return top->emitError("expected a single region top-level op");
+
+  if (top->getRegion(0).getBlocks().empty())
+    return top->emitError("expected at least one block in the region");
 
   // Initialize the top-level state.
   getOrCreate<FooState>(&top->getRegion(0).front())->join(0);

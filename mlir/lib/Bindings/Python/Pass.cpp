@@ -56,11 +56,14 @@ void mlir::python::populatePassManagerSubmodule(py::module &m) {
   // Mapping of the top-level PassManager
   //----------------------------------------------------------------------------
   py::class_<PyPassManager>(m, "PassManager", py::module_local())
-      .def(py::init<>([](DefaultingPyMlirContext context) {
-             MlirPassManager passManager =
-                 mlirPassManagerCreate(context->get());
+      .def(py::init<>([](const std::string &anchorOp,
+                         DefaultingPyMlirContext context) {
+             MlirPassManager passManager = mlirPassManagerCreateOnOperation(
+                 context->get(),
+                 mlirStringRefCreate(anchorOp.data(), anchorOp.size()));
              return new PyPassManager(passManager);
            }),
+           py::arg("anchor_op") = py::str("any"),
            py::arg("context") = py::none(),
            "Create a new PassManager for the current (or provided) Context.")
       .def_property_readonly(MLIR_PYTHON_CAPI_PTR_ATTR,
@@ -82,15 +85,15 @@ void mlir::python::populatePassManagerSubmodule(py::module &m) {
           py::arg("enable"), "Enable / disable verify-each.")
       .def_static(
           "parse",
-          [](const std::string pipeline, DefaultingPyMlirContext context) {
+          [](const std::string &pipeline, DefaultingPyMlirContext context) {
             MlirPassManager passManager = mlirPassManagerCreate(context->get());
+            PyPrintAccumulator errorMsg;
             MlirLogicalResult status = mlirParsePassPipeline(
                 mlirPassManagerGetAsOpPassManager(passManager),
-                mlirStringRefCreate(pipeline.data(), pipeline.size()));
+                mlirStringRefCreate(pipeline.data(), pipeline.size()),
+                errorMsg.getCallback(), errorMsg.getUserData());
             if (mlirLogicalResultIsFailure(status))
-              throw SetPyError(PyExc_ValueError,
-                               llvm::Twine("invalid pass pipeline '") +
-                                   pipeline + "'.");
+              throw SetPyError(PyExc_ValueError, std::string(errorMsg.join()));
             return new PyPassManager(passManager);
           },
           py::arg("pipeline"), py::arg("context") = py::none(),
@@ -98,17 +101,31 @@ void mlir::python::populatePassManagerSubmodule(py::module &m) {
           "that can be applied on a Module. Throw a ValueError if the pipeline "
           "can't be parsed")
       .def(
+          "add",
+          [](PyPassManager &passManager, const std::string &pipeline) {
+            PyPrintAccumulator errorMsg;
+            MlirLogicalResult status = mlirOpPassManagerAddPipeline(
+                mlirPassManagerGetAsOpPassManager(passManager.get()),
+                mlirStringRefCreate(pipeline.data(), pipeline.size()),
+                errorMsg.getCallback(), errorMsg.getUserData());
+            if (mlirLogicalResultIsFailure(status))
+              throw SetPyError(PyExc_ValueError, std::string(errorMsg.join()));
+          },
+          py::arg("pipeline"),
+          "Add textual pipeline elements to the pass manager. Throws a "
+          "ValueError if the pipeline can't be parsed.")
+      .def(
           "run",
-          [](PyPassManager &passManager, PyModule &module) {
-            MlirLogicalResult status =
-                mlirPassManagerRun(passManager.get(), module.get());
+          [](PyPassManager &passManager, PyOperationBase &op) {
+            MlirLogicalResult status = mlirPassManagerRunOnOp(
+                passManager.get(), op.getOperation().get());
             if (mlirLogicalResultIsFailure(status))
               throw SetPyError(PyExc_RuntimeError,
                                "Failure while executing pass pipeline.");
           },
-          py::arg("module"),
-          "Run the pass manager on the provided module, throw a RuntimeError "
-          "on failure.")
+          py::arg("operation"),
+          "Run the pass manager on the provided operation, throw a "
+          "RuntimeError on failure.")
       .def(
           "__str__",
           [](PyPassManager &self) {

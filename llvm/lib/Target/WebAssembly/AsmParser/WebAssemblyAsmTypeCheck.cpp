@@ -15,10 +15,9 @@
 
 #include "AsmParser/WebAssemblyAsmTypeCheck.h"
 #include "MCTargetDesc/WebAssemblyMCTargetDesc.h"
+#include "MCTargetDesc/WebAssemblyMCTypeUtilities.h"
 #include "MCTargetDesc/WebAssemblyTargetStreamer.h"
 #include "TargetInfo/WebAssemblyTargetInfo.h"
-#include "Utils/WebAssemblyTypeUtilities.h"
-#include "Utils/WebAssemblyUtilities.h"
 #include "WebAssembly.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -74,30 +73,27 @@ bool WebAssemblyAsmTypeCheck::typeError(SMLoc ErrorLoc, const Twine &Msg) {
   // which are mostly not helpful.
   if (TypeErrorThisFunction)
     return true;
-  // If we're currently in unreachable code, we surpress errors as well.
+  // If we're currently in unreachable code, we suppress errors completely.
   if (Unreachable)
-    return true;
+    return false;
   TypeErrorThisFunction = true;
   dumpTypeStack("current stack: ");
   return Parser.Error(ErrorLoc, Msg);
 }
 
 bool WebAssemblyAsmTypeCheck::popType(SMLoc ErrorLoc,
-                                      Optional<wasm::ValType> EVT) {
+                                      std::optional<wasm::ValType> EVT) {
   if (Stack.empty()) {
     return typeError(ErrorLoc,
-                      EVT.hasValue()
-                          ? StringRef("empty stack while popping ") +
-                                WebAssembly::typeToString(EVT.getValue())
-                          : StringRef(
-                                    "empty stack while popping value"));
+                     EVT ? StringRef("empty stack while popping ") +
+                               WebAssembly::typeToString(*EVT)
+                         : StringRef("empty stack while popping value"));
   }
   auto PVT = Stack.pop_back_val();
-  if (EVT.hasValue() && EVT.getValue() != PVT) {
-    return typeError(
-        ErrorLoc, StringRef("popped ") + WebAssembly::typeToString(PVT) +
-                                    ", expected " +
-                                    WebAssembly::typeToString(EVT.getValue()));
+  if (EVT && *EVT != PVT) {
+    return typeError(ErrorLoc,
+                     StringRef("popped ") + WebAssembly::typeToString(PVT) +
+                         ", expected " + WebAssembly::typeToString(*EVT));
   }
   return false;
 }
@@ -187,7 +183,7 @@ bool WebAssemblyAsmTypeCheck::getGlobal(SMLoc ErrorLoc, const MCInst &Inst,
     default:
       break;
     }
-    LLVM_FALLTHROUGH;
+    [[fallthrough]];
   default:
     return typeError(ErrorLoc, StringRef("symbol ") + WasmSym->getName() +
                                     " missing .globaltype");
@@ -334,7 +330,7 @@ bool WebAssemblyAsmTypeCheck::typeCheck(SMLoc ErrorLoc, const MCInst &Inst,
     const auto &II = MII.get(RegOpc);
     // First pop all the uses off the stack and check them.
     for (unsigned I = II.getNumOperands(); I > II.getNumDefs(); I--) {
-      const auto &Op = II.OpInfo[I - 1];
+      const auto &Op = II.operands()[I - 1];
       if (Op.OperandType == MCOI::OPERAND_REGISTER) {
         auto VT = WebAssembly::regClassToValType(Op.RegClass);
         if (popType(ErrorLoc, VT))
@@ -343,7 +339,7 @@ bool WebAssemblyAsmTypeCheck::typeCheck(SMLoc ErrorLoc, const MCInst &Inst,
     }
     // Now push all the defs onto the stack.
     for (unsigned I = 0; I < II.getNumDefs(); I++) {
-      const auto &Op = II.OpInfo[I];
+      const auto &Op = II.operands()[I];
       assert(Op.OperandType == MCOI::OPERAND_REGISTER && "Register expected");
       auto VT = WebAssembly::regClassToValType(Op.RegClass);
       Stack.push_back(VT);

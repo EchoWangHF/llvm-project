@@ -185,8 +185,10 @@ foreach Index = { 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30 } in
 }
 
 // The representation of r0 when treated as the constant 0.
+let isConstant = true in {
 def ZERO  : GPR<0, "0">,    DwarfRegAlias<R0>;
 def ZERO8 : GP8<ZERO, "0">, DwarfRegAlias<X0>;
+} // isConstant = true
 
 // Representations of the frame pointer used by ISD::FRAMEADDR.
 def FP   : GPR<0 /* arbitrary */, "**FRAME POINTER**">;
@@ -444,6 +446,7 @@ def G8pRC :
 }
 
 include "PPCRegisterInfoMMA.td"
+include "PPCRegisterInfoDMR.td"
 
 //===----------------------------------------------------------------------===//
 // PowerPC Operand Definitions.
@@ -545,6 +548,7 @@ def PPCU1ImmAsmOperand : AsmOperandClass {
 def u1imm   : Operand<i32> {
   let PrintMethod = "printU1ImmOperand";
   let ParserMatchClass = PPCU1ImmAsmOperand;
+  let DecoderMethod = "decodeUImmOperand<1>";
   let OperandType = "OPERAND_IMMEDIATE";
 }
 
@@ -555,6 +559,7 @@ def PPCU2ImmAsmOperand : AsmOperandClass {
 def u2imm   : Operand<i32> {
   let PrintMethod = "printU2ImmOperand";
   let ParserMatchClass = PPCU2ImmAsmOperand;
+  let DecoderMethod = "decodeUImmOperand<2>";
   let OperandType = "OPERAND_IMMEDIATE";
 }
 
@@ -575,6 +580,7 @@ def PPCU3ImmAsmOperand : AsmOperandClass {
 def u3imm   : Operand<i32> {
   let PrintMethod = "printU3ImmOperand";
   let ParserMatchClass = PPCU3ImmAsmOperand;
+  let DecoderMethod = "decodeUImmOperand<3>";
   let OperandType = "OPERAND_IMMEDIATE";
 }
 
@@ -585,6 +591,7 @@ def PPCU4ImmAsmOperand : AsmOperandClass {
 def u4imm   : Operand<i32> {
   let PrintMethod = "printU4ImmOperand";
   let ParserMatchClass = PPCU4ImmAsmOperand;
+  let DecoderMethod = "decodeUImmOperand<4>";
   let OperandType = "OPERAND_IMMEDIATE";
 }
 def PPCS5ImmAsmOperand : AsmOperandClass {
@@ -725,6 +732,7 @@ def immZero : Operand<i32> {
 }
 
 def fpimm0 : PatLeaf<(fpimm), [{ return N->isExactlyValue(+0.0); }]>;
+def fpimm0neg : PatLeaf<(fpimm), [{return N->isExactlyValue(-0.0);}]>;
 
 def PPCDirectBrAsmOperand : AsmOperandClass {
   let Name = "DirectBr"; let PredicateMethod = "isDirectBr";
@@ -795,20 +803,23 @@ def PPCDispRI34Operand : AsmOperandClass {
 }
 def dispRI34 : Operand<iPTR> {
   let ParserMatchClass = PPCDispRI34Operand;
+  let EncoderMethod = "getDispRI34Encoding";
+  let DecoderMethod = "decodeSImmOperand<34>";
+}
+def dispRI34_pcrel : Operand<iPTR> {
+  let ParserMatchClass = PPCDispRI34Operand;
+  let EncoderMethod = "getDispRI34PCRelEncoding";
+  let DecoderMethod = "decodeSImmOperand<34>";
 }
 def memri34 : Operand<iPTR> { // memri, imm is a 34-bit value.
   let PrintMethod = "printMemRegImm34";
   let MIOperandInfo = (ops dispRI34:$imm, ptr_rc_nor0:$reg);
-  let EncoderMethod = "getMemRI34Encoding";
-  let DecoderMethod = "decodeMemRI34Operands";
 }
 // memri, imm is a 34-bit value for pc-relative instructions where
 // base register is set to zero.
 def memri34_pcrel : Operand<iPTR> { // memri, imm is a 34-bit value.
   let PrintMethod = "printMemRegImm34PCRel";
-  let MIOperandInfo = (ops dispRI34:$imm, immZero:$reg);
-  let EncoderMethod = "getMemRI34PCRelEncoding";
-  let DecoderMethod = "decodeMemRI34PCRelOperands";
+  let MIOperandInfo = (ops dispRI34_pcrel:$imm, immZero:$reg);
 }
 
 // A version of ptr_rc usable with the asm parser.
@@ -825,6 +836,7 @@ def PPCDispRIOperand : AsmOperandClass {
 }
 def dispRI : Operand<iPTR> {
   let ParserMatchClass = PPCDispRIOperand;
+  let EncoderMethod = "getDispRIEncoding";
 }
 def PPCDispRIXOperand : AsmOperandClass {
  let Name = "DispRIX"; let PredicateMethod = "isS16ImmX4";
@@ -832,6 +844,8 @@ def PPCDispRIXOperand : AsmOperandClass {
 }
 def dispRIX : Operand<iPTR> {
   let ParserMatchClass = PPCDispRIXOperand;
+  let EncoderMethod = "getDispRIXEncoding";
+  let DecoderMethod = "decodeDispRIXOperand";
 }
 def PPCDispRIHashOperand : AsmOperandClass {
   let Name = "DispRIHash"; let PredicateMethod = "isHashImmX8";
@@ -839,6 +853,8 @@ def PPCDispRIHashOperand : AsmOperandClass {
 }
 def dispRIHash : Operand<iPTR> {
   let ParserMatchClass = PPCDispRIHashOperand;
+  let EncoderMethod = "getDispRIHashEncoding";
+  let DecoderMethod = "decodeDispRIHashOperand";
 }
 def PPCDispRIX16Operand : AsmOperandClass {
  let Name = "DispRIX16"; let PredicateMethod = "isS16ImmX16";
@@ -846,6 +862,9 @@ def PPCDispRIX16Operand : AsmOperandClass {
 }
 def dispRIX16 : Operand<iPTR> {
   let ParserMatchClass = PPCDispRIX16Operand;
+  let EncoderMethod = "getDispRIX16Encoding";
+  let DecoderMethod = "decodeDispRIX16Operand";
+
 }
 def PPCDispSPE8Operand : AsmOperandClass {
  let Name = "DispSPE8"; let PredicateMethod = "isU8ImmX8";
@@ -853,6 +872,8 @@ def PPCDispSPE8Operand : AsmOperandClass {
 }
 def dispSPE8 : Operand<iPTR> {
   let ParserMatchClass = PPCDispSPE8Operand;
+  let DecoderMethod = "decodeDispSPE8Operand";
+  let EncoderMethod = "getDispSPE8Encoding";
 }
 def PPCDispSPE4Operand : AsmOperandClass {
  let Name = "DispSPE4"; let PredicateMethod = "isU7ImmX4";
@@ -860,6 +881,8 @@ def PPCDispSPE4Operand : AsmOperandClass {
 }
 def dispSPE4 : Operand<iPTR> {
   let ParserMatchClass = PPCDispSPE4Operand;
+  let DecoderMethod = "decodeDispSPE4Operand";
+  let EncoderMethod = "getDispSPE4Encoding";
 }
 def PPCDispSPE2Operand : AsmOperandClass {
  let Name = "DispSPE2"; let PredicateMethod = "isU6ImmX2";
@@ -867,13 +890,13 @@ def PPCDispSPE2Operand : AsmOperandClass {
 }
 def dispSPE2 : Operand<iPTR> {
   let ParserMatchClass = PPCDispSPE2Operand;
+  let DecoderMethod = "decodeDispSPE2Operand";
+  let EncoderMethod = "getDispSPE2Encoding";
 }
 
 def memri : Operand<iPTR> {
   let PrintMethod = "printMemRegImm";
   let MIOperandInfo = (ops dispRI:$imm, ptr_rc_nor0:$reg);
-  let EncoderMethod = "getMemRIEncoding";
-  let DecoderMethod = "decodeMemRIOperands";
   let OperandType = "OPERAND_MEMORY";
 }
 def memrr : Operand<iPTR> {
@@ -884,44 +907,32 @@ def memrr : Operand<iPTR> {
 def memrix : Operand<iPTR> {   // memri where the imm is 4-aligned.
   let PrintMethod = "printMemRegImm";
   let MIOperandInfo = (ops dispRIX:$imm, ptr_rc_nor0:$reg);
-  let EncoderMethod = "getMemRIXEncoding";
-  let DecoderMethod = "decodeMemRIXOperands";
   let OperandType = "OPERAND_MEMORY";
 }
 def memrihash : Operand<iPTR> {
   // memrihash 8-aligned for ROP Protection Instructions.
   let PrintMethod = "printMemRegImmHash";
   let MIOperandInfo = (ops dispRIHash:$imm, ptr_rc_nor0:$reg);
-  let EncoderMethod = "getMemRIHashEncoding";
-  let DecoderMethod = "decodeMemRIHashOperands";
   let OperandType = "OPERAND_MEMORY";
 }
 def memrix16 : Operand<iPTR> { // memri, imm is 16-aligned, 12-bit, Inst{16:27}
   let PrintMethod = "printMemRegImm";
   let MIOperandInfo = (ops dispRIX16:$imm, ptr_rc_nor0:$reg);
-  let EncoderMethod = "getMemRIX16Encoding";
-  let DecoderMethod = "decodeMemRIX16Operands";
   let OperandType = "OPERAND_MEMORY";
 }
 def spe8dis : Operand<iPTR> {   // SPE displacement where the imm is 8-aligned.
   let PrintMethod = "printMemRegImm";
   let MIOperandInfo = (ops dispSPE8:$imm, ptr_rc_nor0:$reg);
-  let EncoderMethod = "getSPE8DisEncoding";
-  let DecoderMethod = "decodeSPE8Operands";
   let OperandType = "OPERAND_MEMORY";
 }
 def spe4dis : Operand<iPTR> {   // SPE displacement where the imm is 4-aligned.
   let PrintMethod = "printMemRegImm";
   let MIOperandInfo = (ops dispSPE4:$imm, ptr_rc_nor0:$reg);
-  let EncoderMethod = "getSPE4DisEncoding";
-  let DecoderMethod = "decodeSPE4Operands";
   let OperandType = "OPERAND_MEMORY";
 }
 def spe2dis : Operand<iPTR> {   // SPE displacement where the imm is 2-aligned.
   let PrintMethod = "printMemRegImm";
   let MIOperandInfo = (ops dispSPE2:$imm, ptr_rc_nor0:$reg);
-  let EncoderMethod = "getSPE2DisEncoding";
-  let DecoderMethod = "decodeSPE2Operands";
   let OperandType = "OPERAND_MEMORY";
 }
 
@@ -1010,4 +1021,49 @@ def acc : RegisterOperand<ACCRC> {
 
 def uacc : RegisterOperand<UACCRC> {
   let ParserMatchClass = PPCRegACCRCAsmOperand;
+}
+
+// DMR Register Operands
+def PPCRegDMRROWRCAsmOperand : AsmOperandClass {
+  let Name = "RegDMRROWRC";
+  let PredicateMethod = "isDMRROWRegNumber";
+}
+
+def dmrrow : RegisterOperand<DMRROWRC> {
+  let ParserMatchClass = PPCRegDMRROWRCAsmOperand;
+}
+
+def PPCRegDMRROWpRCAsmOperand : AsmOperandClass {
+  let Name = "RegDMRROWpRC";
+  let PredicateMethod = "isDMRROWpRegNumber";
+}
+
+def dmrrowp : RegisterOperand<DMRROWpRC> {
+  let ParserMatchClass = PPCRegDMRROWpRCAsmOperand;
+}
+
+def wacc : RegisterOperand<WACCRC> {
+  let ParserMatchClass = PPCRegACCRCAsmOperand;
+}
+
+def wacc_hi : RegisterOperand<WACC_HIRC> {
+  let ParserMatchClass = PPCRegACCRCAsmOperand;
+}
+
+def PPCRegDMRRCAsmOperand : AsmOperandClass {
+  let Name = "RegDMRRC";
+  let PredicateMethod = "isDMRRegNumber";
+}
+
+def dmr : RegisterOperand<DMRRC> {
+  let ParserMatchClass = PPCRegDMRRCAsmOperand;
+}
+
+def PPCRegDMRpRCAsmOperand : AsmOperandClass {
+  let Name = "RegDMRpRC";
+  let PredicateMethod = "isDMRpRegNumber";
+}
+
+def dmrp : RegisterOperand<DMRpRC> {
+  let ParserMatchClass = PPCRegDMRpRCAsmOperand;
 }
